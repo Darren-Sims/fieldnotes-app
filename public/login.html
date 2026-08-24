@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Log in — Fieldnotes</title>
+<meta name="robots" content="noindex, nofollow">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Public+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ground: #f5f5f5;
+    --surface: #ffffff;
+    --surface-sunken: #ebebeb;
+    --surface-raised-shadow: 0 1px 2px rgba(10,10,10,0.06), 0 1px 1px rgba(10,10,10,0.04);
+    --border: #d4d4d4;
+    --border-interactive: #737373;
+    --text-primary: #111111;
+    --text-secondary: #404040;
+    --text-on-accent: #ffffff;
+
+    --accent: #3d63d1;
+    --accent-strong: #1e3a8a;
+
+    --danger-text: #b91c1c;
+    --danger-bg: #fdeaea;
+
+    --font-display: "Archivo", "Arial Black", sans-serif;
+    --font-body: "Public Sans", -apple-system, "Segoe UI", sans-serif;
+
+    --radius-sm: 5px;
+    --radius-md: 8px;
+    --radius-lg: 14px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #0a0a0a;
+      --surface: #171717;
+      --surface-sunken: #101010;
+      --surface-raised-shadow: 0 1px 0 rgba(255,255,255,0.03), 0 4px 14px rgba(0,0,0,0.35);
+      --border: #262626;
+      --border-interactive: #666666;
+      --text-primary: #f5f5f5;
+      --text-secondary: #a3a3a3;
+      --text-on-accent: #ffffff;
+      --accent: #6f8fe0;
+      --accent-strong: #a9bcee;
+      --danger-text: #f3a6a6;
+      --danger-bg: #2a0f0f;
+    }
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: var(--ground);
+    color: var(--text-primary);
+    font-family: var(--font-body);
+    font-size: 15px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+  h1 { font-family: var(--font-display); margin: 0; letter-spacing: -0.01em; }
+  p { margin: 0; }
+  a { color: var(--accent); }
+  button { font: inherit; color: inherit; }
+  input, button { font-family: var(--font-body); }
+
+  *:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 3px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+  }
+
+  .card {
+    width: 100%;
+    max-width: 360px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--surface-raised-shadow);
+    padding: 28px 26px 26px;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 22px;
+  }
+  .brand-mark {
+    width: 32px; height: 32px; border-radius: 8px;
+    background: var(--accent);
+    display: grid; place-items: center;
+    color: #fff; font-family: var(--font-display); font-weight: 800; font-size: 16px;
+    flex: none;
+  }
+  .brand-name { font-family: var(--font-display); font-weight: 700; font-size: 18px; }
+  .brand-sub { font-size: 11px; color: var(--text-secondary); margin-top: -2px; }
+
+  h1.title { font-size: 19px; margin-bottom: 4px; }
+  .lede { color: var(--text-secondary); font-size: 13.5px; margin-bottom: 20px; }
+
+  .field { margin-bottom: 16px; }
+  label { display: block; font-size: 12.5px; font-weight: 600; margin-bottom: 5px; color: var(--text-secondary); }
+  input[type="password"] {
+    width: 100%;
+    padding: 10px 11px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-interactive);
+    background: var(--surface);
+    color: var(--text-primary);
+    font-size: 15px;
+  }
+  input[aria-invalid="true"] { border-color: var(--danger-text); }
+
+  .error {
+    display: none;
+    align-items: flex-start;
+    gap: 8px;
+    background: var(--danger-bg);
+    color: var(--danger-text);
+    border-radius: var(--radius-sm);
+    padding: 9px 11px;
+    font-size: 13px;
+    margin-bottom: 16px;
+  }
+  .error[data-show="1"] { display: flex; }
+  .error svg { flex: none; margin-top: 1px; }
+
+  .btn-primary {
+    width: 100%;
+    display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+    padding: 11px 15px; border-radius: var(--radius-sm);
+    font-size: 14px; font-weight: 600; cursor: pointer;
+    border: 1px solid var(--accent);
+    background: var(--accent); color: var(--text-on-accent);
+  }
+  .btn-primary:hover { background: var(--accent-strong); border-color: var(--accent-strong); }
+  .btn-primary[disabled] { opacity: 0.6; cursor: not-allowed; }
+
+  .foot-note { margin-top: 18px; font-size: 12px; color: var(--text-secondary); text-align: center; }
+</style>
+</head>
+<body>
+  <main class="card">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">F</div>
+      <div>
+        <div class="brand-name">Fieldnotes</div>
+        <div class="brand-sub">Studio ops</div>
+      </div>
+    </div>
+
+    <h1 class="title">Log in</h1>
+    <p class="lede">Enter the password to open your tracker.</p>
+
+    <div class="error" id="loginError" role="alert" data-show="0">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.4"/><path d="M8 4.5V8.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="8" cy="11" r="0.9" fill="currentColor"/></svg>
+      <span id="loginErrorText">Incorrect password. Try again.</span>
+    </div>
+
+    <form id="loginForm" novalidate>
+      <div class="field">
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" autocomplete="current-password" required autofocus>
+      </div>
+      <button type="submit" class="btn-primary" id="loginBtn">Log in</button>
+    </form>
+
+    <p class="foot-note">Private tool — access is limited to people with the password.</p>
+  </main>
+
+  <script>
+    (function () {
+      "use strict";
+      var form = document.getElementById("loginForm");
+      var input = document.getElementById("password");
+      var btn = document.getElementById("loginBtn");
+      var errBox = document.getElementById("loginError");
+      var errText = document.getElementById("loginErrorText");
+
+      function showError(msg) {
+        errText.textContent = msg;
+        errBox.setAttribute("data-show", "1");
+        input.setAttribute("aria-invalid", "true");
+      }
+      function clearError() {
+        errBox.setAttribute("data-show", "0");
+        input.removeAttribute("aria-invalid");
+      }
+
+      form.addEventListener("submit", function (e) {
+        e.preventDefault();
+        clearError();
+        var password = input.value;
+        if (!password) {
+          showError("Enter your password.");
+          input.focus();
+          return;
+        }
+        btn.disabled = true;
+        btn.textContent = "Logging in…";
+        fetch("/api/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password: password })
+        })
+          .then(function (res) {
+            if (res.ok) {
+              window.location.href = "/";
+              return;
+            }
+            return res.json().catch(function () { return {}; }).then(function (data) {
+              showError((data && data.error) || "Incorrect password. Try again.");
+              input.value = "";
+              input.focus();
+            });
+          })
+          .catch(function () {
+            showError("Couldn't reach the server. Check your connection and try again.");
+          })
+          .then(function () {
+            btn.disabled = false;
+            btn.textContent = "Log in";
+          });
+      });
+    })();
+  </script>
+</body>
+</html>
