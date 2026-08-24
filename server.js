@@ -4,7 +4,14 @@ var express = require("express");
 var cookieParser = require("cookie-parser");
 var crypto = require("crypto");
 var path = require("path");
+var multer = require("multer");
 var { Pool } = require("pg");
+
+var MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024; // 10MB
+var upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_ATTACHMENT_BYTES }
+});
 
 var PORT = process.env.PORT || 3000;
 var APP_PASSWORD = process.env.APP_PASSWORD;
@@ -157,8 +164,44 @@ function ensureSchema() {
         "INSERT INTO app_auth (id, password_hash) VALUES (1, $1) ON CONFLICT (id) DO NOTHING",
         [hashPassword(APP_PASSWORD)]
       );
+    })
+    .then(function () {
+      // Uploaded file attachments live in their own table rather than in the
+      // app_state JSON blob — that blob is rewritten in full on every
+      // autosave, so putting file bytes in it would mean re-sending every
+      // attached file's bytes on every unrelated edit. Attachments are
+      // fetched per-project on demand instead, and only referenced by id
+      // from the frontend's in-memory state (nothing in app_state points at
+      // them directly — the project id they're linked to is enough).
+      return pool.query(
+        "CREATE TABLE IF NOT EXISTS attachments (" +
+          "id TEXT PRIMARY KEY, " +
+          "project_id TEXT NOT NULL, " +
+          "label TEXT NOT NULL, " +
+          "filename TEXT NOT NULL, " +
+          "mime_type TEXT NOT NULL, " +
+          "size_bytes INTEGER NOT NULL, " +
+          "file_data BYTEA NOT NULL, " +
+          "created_at TIMESTAMPTZ NOT NULL DEFAULT now()" +
+        ")"
+      );
+    })
+    .then(function () {
+      return pool.query("CREATE INDEX IF NOT EXISTS attachments_project_id_idx ON attachments (project_id)");
     });
 }
+
+/* Documents Office can preview inline in a browser tab; everything else
+   (docx, xlsx, zip, ...) downloads instead, since browsers can't render it. */
+var INLINE_MIME_TYPES = {
+  "application/pdf": true,
+  "image/png": true,
+  "image/jpeg": true,
+  "image/gif": true,
+  "image/webp": true,
+  "image/svg+xml": true,
+  "text/plain": true
+};
 
 /* ====================== APP ====================== */
 
@@ -274,6 +317,107 @@ app.put("/api/state", function (req, res) {
     .catch(function (err) {
       console.error("PUT /api/state failed:", err);
       res.status(500).json({ error: "Could not save data" });
+    });
+});
+
+/* ====================== FILE ATTACHMENTS ====================== */
+
+app.get("/api/attachments", function (req, res) {
+  var projectId = req.query.projectId;
+  if (!projectId) return res.status(400).json({ error: "projectId is required" });
+  pool.query(
+    "SELECT id, project_id, label, filename, mime_type, size_bytes, created_at " +
+      "FROM attachments WHERE project_id = $1 ORDER BY created_at ASC",
+    [projectId]
+  )
+    .then(function (result) {
+      res.json(result.rows.map(function (row) {
+        return {
+          id: row.id,
+          projectId: row.project_id,
+          label: row.label,
+          filename: row.filename,
+          mimeType: row.mime_type,
+          sizeBytes: row.size_bytes,
+          createdAt: row.created_at
+        };
+      }));
+    })
+    .catch(function (err) {
+      console.error("GET /api/attachments failed:", err);
+      res.status(500).json({ error: "Could not load attachments" });
+    });
+});
+
+app.post("/api/attachments", function (req, res) {
+  upload.single("file")(req, res, function (err) {
+    if (err instanceof multer.MulterError) {
+      if (err.code === "LIMIT_FILE_SIZE") {
+        return res.status(400).json({ error: "File is too large — the limit is 10MB" });
+      }
+      return res.status(400).json({ error: "Upload failed: " + err.message });
+    }
+    if (err) {
+      console.error("POST /api/attachments upload failed:", err);
+      return res.status(500).json({ error: "Upload failed" });
+    }
+
+    var projectId = req.body && req.body.projectId;
+    var label = (req.body && req.body.label) || "";
+    var file = req.file;
+    if (!projectId) return res.status(400).json({ error: "projectId is required" });
+    if (!file) return res.status(400).json({ error: "No file was uploaded" });
+
+    var id = crypto.randomUUID();
+    var filename = file.originalname || "file";
+    pool.query(
+      "INSERT INTO attachments (id, project_id, label, filename, mime_type, size_bytes, file_data) " +
+        "VALUES ($1, $2, $3, $4, $5, $6, $7)",
+      [id, projectId, label || filename, filename, file.mimetype || "application/octet-stream", file.size, file.buffer]
+    )
+      .then(function () {
+        res.json({
+          id: id,
+          projectId: projectId,
+          label: label || filename,
+          filename: filename,
+          mimeType: file.mimetype || "application/octet-stream",
+          sizeBytes: file.size,
+          createdAt: new Date().toISOString()
+        });
+      })
+      .catch(function (err2) {
+        console.error("POST /api/attachments insert failed:", err2);
+        res.status(500).json({ error: "Could not save the file" });
+      });
+  });
+});
+
+app.get("/api/attachments/:id/download", function (req, res) {
+  pool.query(
+    "SELECT filename, mime_type, file_data FROM attachments WHERE id = $1",
+    [req.params.id]
+  )
+    .then(function (result) {
+      var row = result.rows[0];
+      if (!row) return res.status(404).send("Not found");
+      var disposition = INLINE_MIME_TYPES[row.mime_type] ? "inline" : "attachment";
+      res.setHeader("Content-Type", row.mime_type);
+      res.setHeader("Content-Disposition", disposition + '; filename="' + row.filename.replace(/"/g, "") + '"');
+      res.send(row.file_data);
+    })
+    .catch(function (err) {
+      console.error("GET /api/attachments/:id/download failed:", err);
+      res.status(500).send("Could not load file");
+    });
+});
+
+app.delete("/api/attachments/:id", function (req, res) {
+  pool.query("DELETE FROM attachments WHERE id = $1", [req.params.id])
+    .then(function () { res.json({ ok: true }); })
+    .catch(function (err) {
+      console.error("DELETE /api/attachments/:id failed:", err);
+      res.status(500).json({ error: "Could not delete the file" });
     });
 });
 

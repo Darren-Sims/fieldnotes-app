@@ -1042,42 +1042,92 @@
       (p.notes && p.notes.length ? "" : '<p class="hint" style="margin-top:10px;">No notes yet.</p>') + "</div>" +
       "</div>";
 
+    loadFileAttachments(p.id);
     html += '<div class="section-head"><h2>Attachments</h2></div>';
     html += attachmentsSectionHTML(p);
 
     return html;
   }
 
-  /* ---- Attachments (link-based) ----
-   * The artifact platform doesn't support uploading arbitrary files from
-   * inside a published page for this account (publish() rejects with
-   * capability_disabled for anything beyond the page's own data/store.json).
-   * So an "attachment" here is a link to a file that already lives somewhere
-   * else — Drive, Dropbox, an email — plus a short label. That's just text,
-   * so it saves through the same mutate()/autosave path as everything else
-   * in the app, with no special-case save logic needed. */
+  /* ---- Attachments (links + uploaded files) ----
+   * Two kinds of attachment, shown together in one list: a link out to a
+   * file that already lives elsewhere (Drive, Dropbox, an email), or a file
+   * uploaded straight into Fieldnotes (up to 10MB). Links are just text, so
+   * they save through the same mutate()/autosave path as everything else in
+   * the app. Uploaded files are NOT part of that JSON blob — they live in
+   * their own database table and go through their own upload/download/
+   * delete endpoints, fetched per-project on demand (see loadFileAttachments
+   * below). Putting file bytes in the autosaved blob would mean re-sending
+   * every attached file on every unrelated edit, since that blob is
+   * rewritten in full on each save. */
+
+  var fileAttachmentsCache = {}; // projectId -> array once loaded, null while loading, undefined before first request
+
+  function loadFileAttachments(projectId) {
+    if (fileAttachmentsCache[projectId] !== undefined) return;
+    fileAttachmentsCache[projectId] = null;
+    fetch("/api/attachments?projectId=" + encodeURIComponent(projectId), { cache: "no-store" })
+      .then(function (res) {
+        if (!res.ok) throw new Error("load-failed");
+        return res.json();
+      })
+      .then(function (list) {
+        fileAttachmentsCache[projectId] = list;
+        render();
+      })
+      .catch(function () {
+        fileAttachmentsCache[projectId] = []; // fail quiet rather than block the page — worst case the list looks empty until the project is reopened
+      });
+  }
+
+  function formatFileSize(bytes) {
+    if (bytes == null) return "";
+    if (bytes < 1024) return bytes + " B";
+    if (bytes < 1024 * 1024) return Math.round(bytes / 1024) + " KB";
+    return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+  }
 
   function attachmentsSectionHTML(p) {
-    var atts = p.attachments || [];
+    var links = (p.attachments || []).map(function (a) {
+      return { kind: "link", id: a.id, label: a.label || hostFromUrl(a.url), sub: hostFromUrl(a.url), date: a.addedAt, href: websiteHref(a.url) };
+    });
+    var cached = fileAttachmentsCache[p.id];
+    var loadingFiles = cached == null;
+    var files = (cached || []).map(function (a) {
+      return { kind: "file", id: a.id, label: a.label || a.filename, sub: formatFileSize(a.sizeBytes), date: a.createdAt, href: "/api/attachments/" + a.id + "/download" };
+    });
+    var items = links.concat(files).sort(function (x, y) { return new Date(y.date) - new Date(x.date); });
+
     var html = '<div class="card" style="padding:16px 18px;">' +
-      '<p class="hint" style="margin-bottom:14px;">Link out to proposals, emails, briefs — wherever they already live (Drive, Dropbox, your inbox).</p>' +
+      '<p class="hint" style="margin-bottom:14px;">Link out to files that live elsewhere (Drive, Dropbox, your inbox), or upload one directly (up to 10MB).</p>' +
       '<div class="field" style="margin-bottom:8px;"><label for="attLabelInput">What is it</label>' +
       '<input type="text" id="attLabelInput" placeholder="e.g. Signed proposal, March 2025"></div>' +
       '<div class="field" style="margin-bottom:10px;"><label for="attUrlInput">Link</label>' +
       '<input type="text" id="attUrlInput" placeholder="Paste a link"></div>' +
-      '<button type="button" class="btn btn-sm" data-add-attachment="' + p.id + '">Add link</button>';
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:2px;">' +
+      '<button type="button" class="btn btn-sm" data-add-attachment="' + p.id + '">Add link</button>' +
+      '<span class="hint">or</span>' +
+      '<input type="file" id="attFileInput" style="max-width:220px;">' +
+      '<button type="button" class="btn btn-sm" data-upload-attachment="' + p.id + '">Upload file</button>' +
+      "</div>";
 
-    if (atts.length) {
-      html += '<div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border-subtle);">' + atts.slice().reverse().map(function (a) {
+    if (items.length) {
+      html += '<div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border-subtle);">' + items.map(function (a) {
+        var kindTag = a.kind === "file" ? '<span class="pill pill-neutral" style="margin-right:6px;">Uploaded</span>' : "";
+        var delAttr = a.kind === "file"
+          ? 'data-delete-file-attachment="' + a.id + '"'
+          : 'data-delete-attachment="' + a.id + '" data-attachment-project="' + p.id + '"';
         return '<div class="list-row" style="padding:8px 0;">' +
-          '<div class="list-row-main"><div class="list-row-title">' +
-          '<a href="' + esc(websiteHref(a.url)) + '" target="_blank" rel="noopener noreferrer">' + esc(a.label || hostFromUrl(a.url)) + "</a></div>" +
-          '<div class="list-row-sub">' + esc(hostFromUrl(a.url)) + " &middot; added " + fmtDateShort(a.addedAt.slice(0, 10)) + "</div></div>" +
-          '<button type="button" class="icon-btn" data-delete-attachment="' + a.id + '" data-attachment-project="' + p.id + '" title="Remove">Remove</button>' +
+          '<div class="list-row-main"><div class="list-row-title">' + kindTag +
+          '<a href="' + esc(a.href) + '" target="_blank" rel="noopener noreferrer">' + esc(a.label) + "</a></div>" +
+          '<div class="list-row-sub">' + esc(a.sub) + " &middot; added " + fmtDateShort(String(a.date).slice(0, 10)) + "</div></div>" +
+          '<button type="button" class="icon-btn" ' + delAttr + ' title="Remove">Remove</button>' +
           "</div>";
       }).join("") + "</div>";
+    } else if (loadingFiles) {
+      html += '<p class="hint" style="margin-top:14px;">Loading…</p>';
     } else {
-      html += '<p class="hint" style="margin-top:14px;">No links added yet.</p>';
+      html += '<p class="hint" style="margin-top:14px;">No links or files added yet.</p>';
     }
     html += "</div>";
     return html;
@@ -1857,6 +1907,75 @@
           if (!proj) return;
           mutate(function () { proj.attachments = (proj.attachments || []).filter(function (a) { return a.id !== delAttId; }); });
           showToast("Link removed");
+        }
+      });
+      return;
+    }
+    if ((el = e.target.closest("[data-upload-attachment]"))) {
+      var uploadProjId = el.getAttribute("data-upload-attachment");
+      var fileEl = document.getElementById("attFileInput");
+      var uploadLabelEl = document.getElementById("attLabelInput");
+      var file = fileEl && fileEl.files ? fileEl.files[0] : null;
+      if (!file) { if (fileEl) fileEl.focus(); return; }
+      if (file.size > 10 * 1024 * 1024) {
+        showToast("That file is over 10MB — pick a smaller one");
+        return;
+      }
+      var fd = new FormData();
+      fd.append("projectId", uploadProjId);
+      fd.append("label", uploadLabelEl ? uploadLabelEl.value.trim() : "");
+      fd.append("file", file);
+      el.disabled = true;
+      var origLabel = el.textContent;
+      el.textContent = "Uploading…";
+      fetch("/api/attachments", { method: "POST", body: fd })
+        .then(function (res) {
+          if (res.status === 401) { window.location.href = "/login"; throw new Error("unauthorized"); }
+          return res.json().catch(function () { return {}; }).then(function (data) {
+            if (!res.ok) throw new Error((data && data.error) || "upload-failed");
+            return data;
+          });
+        })
+        .then(function (saved) {
+          var list = fileAttachmentsCache[uploadProjId];
+          fileAttachmentsCache[uploadProjId] = (list || []).concat([saved]);
+          if (fileEl) fileEl.value = "";
+          if (uploadLabelEl) uploadLabelEl.value = "";
+          showToast("File uploaded");
+          render();
+        })
+        .catch(function (err) {
+          if (err && err.message === "unauthorized") return;
+          showToast("Couldn't upload that file — try again");
+        })
+        .then(function () {
+          el.disabled = false;
+          el.textContent = origLabel;
+        });
+      return;
+    }
+    if ((el = e.target.closest("[data-delete-file-attachment]"))) {
+      var delFileId = el.getAttribute("data-delete-file-attachment");
+      confirmAction("Remove this file?", {
+        title: "Remove file",
+        confirmLabel: "Remove file",
+        danger: true,
+        onConfirm: function () {
+          fetch("/api/attachments/" + delFileId, { method: "DELETE" })
+            .then(function (res) {
+              if (res.status === 401) { window.location.href = "/login"; throw new Error("unauthorized"); }
+              if (!res.ok) throw new Error("delete-failed");
+              Object.keys(fileAttachmentsCache).forEach(function (pid) {
+                var list = fileAttachmentsCache[pid];
+                if (list) fileAttachmentsCache[pid] = list.filter(function (a) { return a.id !== delFileId; });
+              });
+              showToast("File removed");
+              render();
+            })
+            .catch(function (err) {
+              if (err && err.message === "unauthorized") return;
+              showToast("Couldn't remove that file — try again");
+            });
         }
       });
       return;
