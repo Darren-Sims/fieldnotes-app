@@ -198,7 +198,8 @@
   .save-pill[data-state="saved"] .save-dot { background: var(--success-text); }
   .save-pill[data-state="saving"] .save-dot { background: var(--warning-text); }
   .save-pill[data-state="error"] .save-dot,
-  .save-pill[data-state="readonly"] .save-dot { background: var(--danger-text); }
+  .save-pill[data-state="readonly"] .save-dot,
+  .save-pill[data-state="load_error"] .save-dot { background: var(--danger-text); }
 
   .main {
     flex: 1 1 auto;
@@ -462,18 +463,27 @@
   }
 
   var state = defaultState();
-  var saveState = "idle"; // idle | saving | saved | dirty | error | readonly
+  var saveState = "idle"; // idle | saving | saved | dirty | error | readonly | load_error
   var saveErrorMsg = "";
   var saveTimer = null;
   var hasLoadedRemote = false;
+  var loadFailed = false;
 
   /* ====================== PERSISTENCE ====================== */
   /* Talks to this app's own server (server.js) — GET/PUT /api/state, backed
      by Postgres. A 401 means the login cookie is missing or expired, which
      the server only issues once the password is entered — redirect there
-     rather than showing a scary save error. */
+     rather than showing a scary save error.
 
-  function loadData() {
+     loadData() retries on failure rather than giving up immediately, since a
+     free-tier host can take a while to wake from a cold start. Until it
+     succeeds at least once, hasLoadedRemote stays false and scheduleSave()
+     refuses to run — otherwise a failed load would leave `state` at its
+     empty defaults, and any edit made in that window would autosave and
+     overwrite whatever was already saved on the server with nothing. */
+
+  function loadData(attempt) {
+    attempt = attempt || 1;
     return fetch("/api/state", { cache: "no-store" })
       .then(function (res) {
         if (res.status === 401) { window.location.href = "/login"; throw new Error("unauthorized"); }
@@ -483,13 +493,20 @@
       .then(function (data) {
         state = Object.assign(defaultState(), data);
         hasLoadedRemote = true;
+        loadFailed = false;
       })
-      .catch(function () {
-        state = defaultState();
+      .catch(function (err) {
+        if (err && err.message === "unauthorized") return;
+        if (attempt < 6) {
+          return new Promise(function (resolve) { setTimeout(resolve, attempt * 3000); })
+            .then(function () { return loadData(attempt + 1); });
+        }
+        loadFailed = true;
       });
   }
 
   function scheduleSave() {
+    if (!hasLoadedRemote) return; // never autosave over data we haven't actually loaded yet
     setSaveState("dirty");
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(persistNow, 1200);
@@ -727,7 +744,8 @@
       saving: "Saving…",
       dirty: "Unsaved changes",
       error: "Couldn't save — " + saveErrorMsg,
-      readonly: "Session expired — redirecting to login…"
+      readonly: "Session expired — redirecting to login…",
+      load_error: "Couldn't load your data — refresh to retry. Nothing will save until it loads."
     };
     pill.setAttribute("data-state", saveState);
     text.textContent = map[saveState] || "—";
@@ -2003,7 +2021,7 @@
   function boot() {
     render();
     loadData().then(function () {
-      setSaveState("saved");
+      setSaveState(loadFailed ? "load_error" : "saved");
       render();
     });
   }
