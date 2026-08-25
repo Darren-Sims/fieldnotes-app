@@ -1049,6 +1049,9 @@
       (p.notes && p.notes.length ? "" : '<p class="hint" style="margin-top:10px;">No notes yet.</p>') + "</div>" +
       "</div>";
 
+    html += '<div class="section-head"><h2>Contract</h2></div>';
+    html += contractSectionHTML(p);
+
     loadFileAttachments(p.id);
     html += '<div class="section-head"><h2>Attachments</h2></div>';
     html += attachmentsSectionHTML(p);
@@ -1361,17 +1364,17 @@
     return html;
   }
 
-  function blankContract() {
+  function blankContract(presets) {
     var now = new Date().toISOString();
     var last = state.contracts.length
       ? state.contracts.slice().sort(function (a, b) { return b.createdAt.localeCompare(a.createdAt); })[0]
       : null;
     return {
       id: uid("con"),
-      clientName: "",
+      clientName: (presets && presets.clientName) || "",
       clientCompany: "",
       clientAddress: "",
-      projectName: "",
+      projectName: (presets && presets.projectName) || "",
       yourName: last ? last.yourName : "",
       yourAddress: last ? last.yourAddress : "",
       yourEmail: last ? last.yourEmail : "",
@@ -1389,9 +1392,46 @@
       liability: "The Developer is not liable for indirect or consequential loss arising from this project. The Developer's total liability under this agreement is capped at the total fees paid by the Client.",
       confidentiality: "Both parties agree to keep anything shared in confidence during this project private, and not to pass it on to anyone else without permission.",
       governingLaw: "England and Wales",
+      projectId: (presets && presets.projectId) || null,
+      shareToken: null,
       createdAt: now,
       updatedAt: now
     };
+  }
+
+  function contractShareCardInner(c) {
+    if (!c.shareToken) {
+      return '<p class="hint" style="margin-bottom:10px;">Share this contract with a link your client can open without logging in.</p>' +
+        '<button type="button" class="btn btn-sm" data-share-contract="' + c.id + '">Create share link</button>';
+    }
+    var url = location.origin + "/share/contract/" + c.shareToken;
+    return '<p class="hint" style="margin-bottom:8px;">Anyone with this link can view — and download a PDF of — this contract. It updates automatically as you edit.</p>' +
+      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' +
+      '<input type="text" readonly value="' + esc(url) + '" style="flex:1;min-width:220px;font-family:var(--font-mono);font-size:12.5px;" onclick="this.select()">' +
+      '<button type="button" class="btn btn-sm" data-copy-share-link="' + esc(url) + '">Copy link</button>' +
+      '<button type="button" class="btn btn-sm btn-danger-quiet" data-stop-share-contract="' + c.id + '">Stop sharing</button>' +
+      "</div>";
+  }
+
+  function contractSectionHTML(p) {
+    var linked = state.contracts.filter(function (c) { return c.projectId === p.id; });
+    if (!linked.length) {
+      return '<div class="card" style="padding:16px 18px;">' +
+        '<p class="hint" style="margin-bottom:10px;">No contract linked to this project yet.</p>' +
+        '<button type="button" class="btn btn-sm" data-new-contract-for-project="' + p.id + '">Create contract</button>' +
+        "</div>";
+    }
+    return '<div class="card" style="padding:8px 4px;">' + linked.map(function (c) {
+      var shareUrl = c.shareToken ? (location.origin + "/share/contract/" + c.shareToken) : "";
+      return '<div class="list-row" style="padding:10px 14px;">' +
+        '<div class="list-row-main"><div class="list-row-title">' + esc(c.projectName || "Untitled contract") + '</div>' +
+        '<div class="list-row-sub">' + (c.price ? money(c.price) + " &middot; " : "") + (c.shareToken ? "Link shared" : "Not shared") + "</div></div>" +
+        '<div style="display:flex;gap:6px;flex-wrap:wrap;">' +
+        (shareUrl ? '<button type="button" class="icon-btn" data-copy-share-link="' + esc(shareUrl) + '" title="Copy share link">Copy link</button>' : "") +
+        '<button type="button" class="icon-btn" data-download-contract-pdf="' + c.id + '" title="Download PDF">PDF</button>' +
+        '<button type="button" class="btn btn-sm" data-nav="#/contracts/' + c.id + '">Open</button>' +
+        "</div></div>";
+    }).join("") + "</div>";
   }
 
   function viewContractEditor(id) {
@@ -1400,10 +1440,13 @@
 
     var html = '<button class="back-link" data-nav="#/contracts">&larr; All contracts</button>';
     html += '<div class="page-head"><div><div class="page-eyebrow">Contract</div><h1>' + esc(c.projectName || "Untitled contract") + "</h1></div>" +
-      '<div style="display:flex;gap:8px;">' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;">' +
       '<button class="btn btn-sm" data-download-contract="' + c.id + '">Download .md</button>' +
+      '<button class="btn btn-sm" data-download-contract-pdf="' + c.id + '">Download .pdf</button>' +
       '<button class="btn btn-sm btn-danger-quiet" data-delete-contract="' + c.id + '">Delete</button>' +
       "</div></div>";
+
+    html += '<div class="card" id="contractShareCard" style="padding:14px 18px;margin-bottom:16px;">' + contractShareCardInner(c) + "</div>";
 
     html += '<div class="split">';
     html += '<form class="card" style="padding:20px 22px;" id="contractForm" data-contract-id="' + c.id + '">';
@@ -1418,11 +1461,16 @@
     html += '<label class="form-section-label">You (the Developer)</label>';
     html += fieldRow([
       field("Your name / business", "text", "c_yourName", c.yourName),
-      field("Your email", "email", "c_yourEmail", c.yourEmail)
+      field("Your email", "text", "c_yourEmail", c.yourEmail)
     ]);
     html += textField("Your address (optional)", "c_yourAddress", c.yourAddress);
 
     html += '<label class="form-section-label">The project</label>';
+    var contractProjectOptions = '<option value="">No linked project</option>' + state.projects.map(function (pr) {
+      return '<option value="' + esc(pr.id) + '"' + (c.projectId === pr.id ? " selected" : "") + '>' + esc(pr.name) + '</option>';
+    }).join("");
+    html += '<div class="field"><label for="c_projectId">Linked project (optional)</label><select id="c_projectId">' + contractProjectOptions + '</select>' +
+      '<div class="hint">Shows this contract on that project\'s page.</div></div>';
     html += fieldRow([
       field("Project name", "text", "c_projectName", c.projectName),
       field("Contract date", "date", "c_contractDate", c.contractDate)
@@ -1999,6 +2047,7 @@
           mutate(function () { state.contracts = state.contracts.filter(function (x) { return x.id !== conId; }); });
           navigate("#/contracts");
           showToast("Contract deleted");
+          fetch("/api/contract-shares/" + conId, { method: "DELETE" }).catch(function () {});
         }
       });
       return;
@@ -2020,6 +2069,108 @@
       if (!con2.deliverables.length) con2.deliverables = [""];
       mutate(function () {});
       navigate("#/contracts/" + cid2);
+      scheduleShareSync(con2);
+      return;
+    }
+    if ((el = e.target.closest("[data-new-contract-for-project]"))) {
+      var npProjId = el.getAttribute("data-new-contract-for-project");
+      var npProj = projectById(npProjId);
+      if (!npProj) return;
+      var npClient = clientById(npProj.clientId);
+      var npc = blankContract({ projectId: npProj.id, projectName: npProj.name, clientName: npClient ? npClient.name : "" });
+      mutate(function () { state.contracts.push(npc); });
+      navigate("#/contracts/" + npc.id);
+      return;
+    }
+    if ((el = e.target.closest("[data-download-contract-pdf]"))) {
+      var pdfId = el.getAttribute("data-download-contract-pdf");
+      var pdfC = state.contracts.find(function (x) { return x.id === pdfId; });
+      if (pdfC) {
+        var pdfForm = document.getElementById("contractForm");
+        if (pdfForm && pdfForm.getAttribute("data-contract-id") === pdfId) commitContractForm(pdfC);
+        fetch("/api/contracts/pdf", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(contractSharePayload(pdfC))
+        })
+          .then(function (res) {
+            if (res.status === 401) { window.location.href = "/login"; throw new Error("unauthorized"); }
+            if (!res.ok) throw new Error("pdf-failed");
+            return res.blob();
+          })
+          .then(function (blob) {
+            var filename = (pdfC.projectName || "contract").toLowerCase().replace(/[^a-z0-9]+/g, "-") + ".pdf";
+            var blobUrl = URL.createObjectURL(blob);
+            var a = document.createElement("a");
+            a.href = blobUrl;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            setTimeout(function () { URL.revokeObjectURL(blobUrl); }, 2000);
+          })
+          .catch(function (err) {
+            if (err && err.message === "unauthorized") return;
+            showToast("Couldn't generate the PDF — try again");
+          });
+      }
+      return;
+    }
+    if ((el = e.target.closest("[data-share-contract]"))) {
+      var shId = el.getAttribute("data-share-contract");
+      var shC = state.contracts.find(function (x) { return x.id === shId; });
+      if (shC) {
+        var shForm = document.getElementById("contractForm");
+        if (shForm && shForm.getAttribute("data-contract-id") === shId) commitContractForm(shC);
+        el.disabled = true;
+        fetch("/api/contract-shares", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ contractId: shC.id, data: contractSharePayload(shC) })
+        })
+          .then(function (res) {
+            if (res.status === 401) { window.location.href = "/login"; throw new Error("unauthorized"); }
+            if (!res.ok) throw new Error("share-failed");
+            return res.json();
+          })
+          .then(function (result) {
+            mutate(function () { shC.shareToken = result.token; });
+            showToast("Share link created");
+          })
+          .catch(function (err) {
+            el.disabled = false;
+            if (err && err.message === "unauthorized") return;
+            showToast("Couldn't create a share link — try again");
+          });
+      }
+      return;
+    }
+    if ((el = e.target.closest("[data-stop-share-contract]"))) {
+      var stId = el.getAttribute("data-stop-share-contract");
+      var stC = state.contracts.find(function (x) { return x.id === stId; });
+      if (!stC) return;
+      confirmAction("Stop sharing this contract? The link will stop working.", {
+        title: "Stop sharing",
+        confirmLabel: "Stop sharing",
+        danger: true,
+        onConfirm: function () {
+          fetch("/api/contract-shares/" + stId, { method: "DELETE" })
+            .then(function (res) {
+              if (res.status === 401) { window.location.href = "/login"; throw new Error("unauthorized"); }
+              if (!res.ok) throw new Error("unshare-failed");
+              mutate(function () { stC.shareToken = null; });
+              showToast("Link stopped");
+            })
+            .catch(function (err) {
+              if (err && err.message === "unauthorized") return;
+              showToast("Couldn't stop sharing — try again");
+            });
+        }
+      });
+      return;
+    }
+    if ((el = e.target.closest("[data-copy-share-link]"))) {
+      copyText(el.getAttribute("data-copy-share-link"));
       return;
     }
 
@@ -2275,9 +2426,10 @@
       var cPreview = document.getElementById("contractPreview");
       if (cPreview) cPreview.innerHTML = contractPreviewHTML(conD);
       scheduleSave();
+      scheduleShareSync(conD);
       return;
     }
-    if (e.target.matches("#contractForm input, #contractForm textarea")) {
+    if (e.target.matches("#contractForm input, #contractForm textarea, #contractForm select")) {
       var cf = document.getElementById("contractForm");
       var cid3 = cf.getAttribute("data-contract-id");
       var con3 = state.contracts.find(function (x) { return x.id === cid3; });
@@ -2285,6 +2437,7 @@
       var cPreview2 = document.getElementById("contractPreview");
       if (cPreview2) cPreview2.innerHTML = contractPreviewHTML(con3);
       scheduleSave();
+      scheduleShareSync(con3);
       return;
     }
     if (e.target.matches("[data-draft-text]")) {
@@ -2326,6 +2479,7 @@
     c.yourName = val("c_yourName");
     c.yourEmail = val("c_yourEmail");
     c.yourAddress = val("c_yourAddress");
+    c.projectId = val("c_projectId") || null;
     c.projectName = val("c_projectName");
     c.contractDate = val("c_contractDate");
     c.overview = val("c_overview");
@@ -2342,6 +2496,33 @@
     c.governingLaw = val("c_governingLaw");
     c.updatedAt = new Date().toISOString();
     function val(id) { var e = document.getElementById(id); return e ? e.value : ""; }
+  }
+
+  /* The bits of a contract that are shown on a public share link / PDF —
+   * everything except internal bookkeeping (id, projectId, shareToken,
+   * timestamps), which the client viewing the link has no use for. */
+  function contractSharePayload(c) {
+    return {
+      clientName: c.clientName, clientCompany: c.clientCompany, clientAddress: c.clientAddress,
+      projectName: c.projectName, yourName: c.yourName, yourAddress: c.yourAddress, yourEmail: c.yourEmail,
+      contractDate: c.contractDate, overview: c.overview, deliverables: c.deliverables, exclusions: c.exclusions,
+      startDate: c.startDate, timeline: c.timeline, price: c.price, paymentTerms: c.paymentTerms,
+      revisions: c.revisions, ownership: c.ownership, cancellation: c.cancellation, liability: c.liability,
+      confidentiality: c.confidentiality, governingLaw: c.governingLaw
+    };
+  }
+
+  var shareSyncTimer = null;
+  function scheduleShareSync(c) {
+    if (!c || !c.shareToken) return;
+    if (shareSyncTimer) clearTimeout(shareSyncTimer);
+    shareSyncTimer = setTimeout(function () {
+      fetch("/api/contract-shares", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contractId: c.id, data: contractSharePayload(c) })
+      }).catch(function () { /* best-effort — the next edit will retry */ });
+    }, 1500);
   }
 
   document.addEventListener("click", function (e) {
@@ -2363,6 +2544,7 @@
       con4.deliverables.push("");
       mutate(function () {});
       navigate("#/contracts/" + cid4);
+      scheduleShareSync(con4);
     }
   });
 

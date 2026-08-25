@@ -5,6 +5,7 @@ var cookieParser = require("cookie-parser");
 var crypto = require("crypto");
 var path = require("path");
 var multer = require("multer");
+var PDFDocument = require("pdfkit");
 var { Pool } = require("pg");
 
 var MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024; // 10MB
@@ -188,6 +189,23 @@ function ensureSchema() {
     })
     .then(function () {
       return pool.query("CREATE INDEX IF NOT EXISTS attachments_project_id_idx ON attachments (project_id)");
+    })
+    .then(function () {
+      // A public, unauthenticated snapshot of one contract's fields,
+      // addressed by an unguessable token — kept separate from app_state
+      // (which requires login) so a client holding just the link can view,
+      // and download a PDF of, their contract without a Fieldnotes account.
+      // One row per contract (contract_id is unique) so re-sharing after an
+      // edit just refreshes the same row/token rather than minting a new one.
+      return pool.query(
+        "CREATE TABLE IF NOT EXISTS contract_shares (" +
+          "token TEXT PRIMARY KEY, " +
+          "contract_id TEXT NOT NULL UNIQUE, " +
+          "data JSONB NOT NULL, " +
+          "created_at TIMESTAMPTZ NOT NULL DEFAULT now(), " +
+          "updated_at TIMESTAMPTZ NOT NULL DEFAULT now()" +
+        ")"
+      );
     });
 }
 
@@ -202,6 +220,104 @@ var INLINE_MIME_TYPES = {
   "image/svg+xml": true,
   "text/plain": true
 };
+
+/* ====================== CONTRACT PDF RENDERING ====================== */
+/* Shared by the authenticated "Download .pdf" button and the public share
+   link's PDF download — both just hand this the same plain-fields object
+   the frontend already renders a preview from (see contractSharePayload
+   in index.html), so the PDF, the on-screen preview and the .md export
+   all stay in sync with a single source of truth for wording/order. */
+
+function fmtDatePdf(iso) {
+  if (!iso) return "";
+  var d = new Date(iso + "T00:00:00");
+  if (isNaN(d.getTime())) return String(iso);
+  return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+}
+
+function moneyPdf(n) {
+  var v = Number(n);
+  if (n === "" || n === null || n === undefined || isNaN(v)) return "";
+  return "£" + v.toLocaleString("en-GB", { maximumFractionDigits: 0 });
+}
+
+function contractPdfFilename(data) {
+  var base = (data && data.projectName) ? data.projectName : "contract";
+  return String(base).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "contract";
+}
+
+function renderContractPdf(res, data) {
+  data = data || {};
+  var filename = contractPdfFilename(data);
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", 'attachment; filename="' + filename + '.pdf"');
+
+  var doc = new PDFDocument({ margin: 54, size: "A4" });
+  doc.pipe(res);
+
+  function h2(text) {
+    doc.moveDown(0.9);
+    doc.font("Helvetica-Bold").fontSize(10).fillColor("#555555").text(String(text).toUpperCase(), { characterSpacing: 0.4 });
+    doc.moveDown(0.25);
+  }
+  function body(text) {
+    doc.font("Helvetica").fontSize(10.5).fillColor("#111111").text(String(text || ""), { lineGap: 3 });
+  }
+  function bullet(text) {
+    doc.font("Helvetica").fontSize(10.5).fillColor("#111111").text("•  " + text, { lineGap: 3, indent: 8 });
+  }
+
+  var today = new Date().toISOString().slice(0, 10);
+  var deliverables = (data.deliverables || []).filter(function (d) { return d && String(d).trim(); });
+
+  doc.font("Helvetica-Bold").fontSize(19).fillColor("#111111").text(data.projectName || "Project agreement");
+  doc.moveDown(0.15);
+  doc.font("Helvetica").fontSize(9.5).fillColor("#555555").text(
+    "Between " + (data.yourName || "—") + " and " + (data.clientName || "—") +
+    (data.clientCompany ? " (" + data.clientCompany + ")" : "") + " · " + fmtDatePdf(data.contractDate || today)
+  );
+
+  h2("Parties");
+  body(
+    "This agreement is between " + (data.yourName || "the Developer") + ' ("the Developer")' +
+    (data.yourAddress ? ", of " + data.yourAddress : "") + ", and " + (data.clientName || "the Client") +
+    (data.clientCompany ? " of " + data.clientCompany : "") + ' ("the Client")' +
+    (data.clientAddress ? ", of " + data.clientAddress : "") + "."
+  );
+
+  if (data.overview) { h2("Scope of work"); body(data.overview); }
+  if (deliverables.length) {
+    h2("Deliverables");
+    deliverables.forEach(function (d) { bullet(d); });
+  }
+  if (data.exclusions) { h2("Not included"); body(data.exclusions); }
+  if (data.startDate || data.timeline) {
+    h2("Timeline");
+    body(((data.startDate ? "Starting " + fmtDatePdf(data.startDate) + ". " : "") + (data.timeline || "")).trim());
+  }
+  if (data.price) {
+    h2("Fees");
+    body(moneyPdf(data.price) + (data.paymentTerms ? "\n" + data.paymentTerms : ""));
+  }
+  if (data.revisions) { h2("Revisions"); body(data.revisions); }
+  if (data.ownership) { h2("Ownership & IP"); body(data.ownership); }
+  if (data.cancellation) { h2("Cancellation"); body(data.cancellation); }
+  if (data.liability) { h2("Liability"); body(data.liability); }
+  if (data.confidentiality) { h2("Confidentiality"); body(data.confidentiality); }
+
+  h2("Governing law");
+  body("This agreement is governed by the law of " + (data.governingLaw || "England and Wales") + ".");
+
+  h2("Agreed");
+  doc.moveDown(0.3);
+  body("Client: ______________________     Date: __________");
+  body(data.clientName || "");
+  doc.moveDown(0.6);
+  body("Developer: ______________________     Date: __________");
+  body(data.yourName || "");
+
+  doc.end();
+}
 
 /* ====================== APP ====================== */
 
@@ -286,6 +402,41 @@ app.post("/api/reset-password", function (req, res) {
     .catch(function (err) {
       console.error("POST /api/reset-password failed:", err);
       res.status(500).json({ ok: false, error: "Could not reset the password — try again" });
+    });
+});
+
+/* ====================== PUBLIC CONTRACT SHARE LINKS ====================== */
+/* No auth on these three — the unguessable token IS the credential, same
+   idea as the recovery code. A client with the link can view the contract
+   and download a PDF of it without ever logging in to Fieldnotes. */
+
+app.get("/share/contract/:token", function (req, res) {
+  res.sendFile(path.join(__dirname, "public", "share-contract.html"));
+});
+
+app.get("/api/public/contract-shares/:token", function (req, res) {
+  pool.query("SELECT data, updated_at FROM contract_shares WHERE token = $1", [req.params.token])
+    .then(function (result) {
+      var row = result.rows[0];
+      if (!row) return res.status(404).json({ error: "not-found" });
+      res.json({ data: row.data, updatedAt: row.updated_at });
+    })
+    .catch(function (err) {
+      console.error("GET /api/public/contract-shares/:token failed:", err);
+      res.status(500).json({ error: "Could not load this contract" });
+    });
+});
+
+app.get("/api/public/contract-shares/:token/pdf", function (req, res) {
+  pool.query("SELECT data FROM contract_shares WHERE token = $1", [req.params.token])
+    .then(function (result) {
+      var row = result.rows[0];
+      if (!row) return res.status(404).send("This link isn't valid, or has been removed.");
+      renderContractPdf(res, row.data);
+    })
+    .catch(function (err) {
+      console.error("GET /api/public/contract-shares/:token/pdf failed:", err);
+      if (!res.headersSent) res.status(500).send("Could not load this contract");
     });
 });
 
@@ -418,6 +569,54 @@ app.delete("/api/attachments/:id", function (req, res) {
     .catch(function (err) {
       console.error("DELETE /api/attachments/:id failed:", err);
       res.status(500).json({ error: "Could not delete the file" });
+    });
+});
+
+/* ====================== CONTRACTS: PDF + SHARE LINKS ====================== */
+/* Contracts themselves still live inside the app_state JSON blob, same as
+   proposals — these routes are stateless helpers layered on top: one
+   renders whatever contract fields it's handed as a PDF, the other two
+   manage the public share_contracts row that powers a share link. */
+
+app.post("/api/contracts/pdf", function (req, res) {
+  var data = req.body;
+  if (!data || typeof data !== "object") return res.status(400).json({ error: "Missing contract data" });
+  try {
+    renderContractPdf(res, data);
+  } catch (err) {
+    console.error("POST /api/contracts/pdf failed:", err);
+    if (!res.headersSent) res.status(500).json({ error: "Could not generate the PDF" });
+  }
+});
+
+app.post("/api/contract-shares", function (req, res) {
+  var contractId = req.body && req.body.contractId;
+  var data = req.body && req.body.data;
+  if (!contractId || !data || typeof data !== "object") {
+    return res.status(400).json({ error: "contractId and data are required" });
+  }
+  var newToken = crypto.randomUUID();
+  pool.query(
+    "INSERT INTO contract_shares (token, contract_id, data) VALUES ($1, $2, $3) " +
+      "ON CONFLICT (contract_id) DO UPDATE SET data = EXCLUDED.data, updated_at = now() " +
+      "RETURNING token",
+    [newToken, contractId, data]
+  )
+    .then(function (result) {
+      res.json({ token: result.rows[0].token });
+    })
+    .catch(function (err) {
+      console.error("POST /api/contract-shares failed:", err);
+      res.status(500).json({ error: "Could not create the share link" });
+    });
+});
+
+app.delete("/api/contract-shares/:contractId", function (req, res) {
+  pool.query("DELETE FROM contract_shares WHERE contract_id = $1", [req.params.contractId])
+    .then(function () { res.json({ ok: true }); })
+    .catch(function (err) {
+      console.error("DELETE /api/contract-shares/:contractId failed:", err);
+      res.status(500).json({ error: "Could not stop sharing" });
     });
 });
 
