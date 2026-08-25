@@ -367,16 +367,18 @@
   /* ---------- Proposals ---------- */
   .split { display: grid; grid-template-columns: minmax(320px, 420px) 1fr; gap: 22px; align-items: start; }
   @media (max-width: 900px) { .split { grid-template-columns: 1fr; } }
-  .proposal-preview {
+  .proposal-preview, .contract-preview {
     padding: 32px 36px; font-size: 14px; line-height: 1.65;
   }
-  .proposal-preview h2 { font-size: 20px; margin-bottom: 4px; }
-  .proposal-preview .p-meta { color: var(--text-secondary); font-size: 12.5px; margin-bottom: 22px; }
-  .proposal-preview h3 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-secondary); margin: 22px 0 8px; }
-  .proposal-preview h3:first-of-type { margin-top: 0; }
-  .proposal-preview p { margin-bottom: 10px; white-space: pre-wrap; }
-  .proposal-preview ul { list-style: disc; padding-left: 20px; margin-bottom: 10px; }
-  .proposal-preview li { margin-bottom: 4px; }
+  .proposal-preview h2, .contract-preview h2 { font-size: 20px; margin-bottom: 4px; }
+  .proposal-preview .p-meta, .contract-preview .p-meta { color: var(--text-secondary); font-size: 12.5px; margin-bottom: 22px; }
+  .proposal-preview h3, .contract-preview h3 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-secondary); margin: 22px 0 8px; }
+  .proposal-preview h3:first-of-type, .contract-preview h3:first-of-type { margin-top: 0; }
+  .proposal-preview p, .contract-preview p { margin-bottom: 10px; white-space: pre-wrap; }
+  .proposal-preview ul, .contract-preview ul { list-style: disc; padding-left: 20px; margin-bottom: 10px; }
+  .proposal-preview li, .contract-preview li { margin-bottom: 4px; }
+  .form-section-label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-secondary); display: block; margin: 18px 0 8px; }
+  .form-section-label:first-child { margin-top: 0; }
   .deliverable-row { display: flex; gap: 8px; margin-bottom: 8px; align-items: center; }
   .deliverable-row input { flex: 1; }
   .dyn-add { font-size: 12.5px; color: var(--accent); background: none; border: none; cursor: pointer; font-weight: 600; padding: 4px 0; }
@@ -457,6 +459,7 @@
       projects: [],
       tasks: [],
       proposals: [],
+      contracts: [],
       marketingDrafts: [],
       route: "#/overview"
     };
@@ -694,6 +697,8 @@
     else if (r.name === "clients") view = viewClients();
     else if (r.name === "proposals" && r.id) view = viewProposalEditor(r.id);
     else if (r.name === "proposals") view = viewProposals();
+    else if (r.name === "contracts" && r.id) view = viewContractEditor(r.id);
+    else if (r.name === "contracts") view = viewContracts();
     else if (r.name === "marketing") view = viewMarketing();
     else view = viewOverview();
 
@@ -707,6 +712,7 @@
     projects: '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1.5 4.2c0-.9.7-1.6 1.6-1.6h3l1.4 1.6h5.4c.9 0 1.6.7 1.6 1.6v6.6c0 .9-.7 1.6-1.6 1.6H3.1c-.9 0-1.6-.7-1.6-1.6V4.2z"/></svg>',
     clients: '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="5.2" r="2.7"/><path d="M2.3 14c.6-3 2.8-4.7 5.7-4.7s5.1 1.7 5.7 4.7"/></svg>',
     proposals: '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3.5 1.8h6l3 3v8.4c0 .55-.45 1-1 1h-8c-.55 0-1-.45-1-1v-10.4c0-.55.45-1 1-1z"/><path d="M9.2 1.8v3.2h3.1"/><path d="M5.3 8.4h5.4M5.3 10.7h5.4M5.3 6.1h2.3"/></svg>',
+    contracts: '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3.5 1.8h6l3 3v8.4c0 .55-.45 1-1 1h-8c-.55 0-1-.45-1-1v-10.4c0-.55.45-1 1-1z"/><path d="M9.2 1.8v3.2h3.1"/><path d="M5.3 11.3c1-1.5 1.8-1.5 2.5-.5.7 1 1.5 1 2.5-.5"/></svg>',
     marketing: '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1.8 6.3v3.4c0 .5.4.9.9.9h1.1l3.6 2.8V2.6L3.8 5.4H2.7c-.5 0-.9.4-.9.9z"/><path d="M10.4 5.1c.9.7 1.4 1.8 1.4 2.9s-.5 2.2-1.4 2.9M12.7 3.1c1.5 1.2 2.4 3 2.4 4.9s-.9 3.7-2.4 4.9"/></svg>'
   };
 
@@ -726,6 +732,7 @@
       link("clients", "Clients") +
       link("projects", "Projects") +
       link("proposals", "Proposals") +
+      link("contracts", "Contracts") +
       link("marketing", "Marketing") +
       "</div>" +
       '<div class="rail-foot"><span class="save-pill" id="savePill" data-state="idle"><span class="save-dot"></span><span id="savePillText">—</span></span>' +
@@ -1290,8 +1297,8 @@
     return '<div class="field"><label for="' + id + '">' + esc(label) + '</label><input type="' + type + '" id="' + id + '" value="' + esc(value || "") + '">' +
       (hint ? '<div class="hint">' + esc(hint) + "</div>" : "") + "</div>";
   }
-  function textField(label, id, value, hint) {
-    return '<div class="field"><label for="' + id + '">' + esc(label) + '</label><textarea id="' + id + '" rows="3">' + esc(value || "") + "</textarea>" +
+  function textField(label, id, value, hint, rows) {
+    return '<div class="field"><label for="' + id + '">' + esc(label) + '</label><textarea id="' + id + '" rows="' + (rows || 3) + '">' + esc(value || "") + "</textarea>" +
       (hint ? '<div class="hint">' + esc(hint) + "</div>" : "") + "</div>";
   }
   function fieldRow(fields) { return '<div class="field-row">' + fields.join("") + "</div>"; }
@@ -1327,6 +1334,189 @@
     if (pr.price) { lines.push("## Investment", money(pr.price), pr.paymentTerms || "", ""); }
     if (pr.terms) { lines.push("## Terms", pr.terms, ""); }
     lines.push("## Next steps", "Reply to confirm and I'll send an invoice for the deposit. Work starts once that's settled.");
+    return lines.join("\n");
+  }
+
+  /* ====================== VIEW: CONTRACTS ====================== */
+  /* One-off project agreements. Same pattern as Proposals: a form, a live
+   * preview, a markdown export. This is a starting-point template, not
+   * legal advice — the page copy says so; the exported document itself
+   * stays plain, since that's the thing a client actually reads. */
+
+  function viewContracts() {
+    var html = pageHead("Contracts", "Draft, preview and export a project agreement. A starting point — worth a solicitor's once-over before it's relied on for real work.",
+      '<button class="btn btn-primary" data-new-contract="1">New contract</button>');
+    if (!state.contracts.length) {
+      return html + emptyState("No contracts yet", "Start one from scratch for a client project.",
+        '<button class="btn btn-primary" data-new-contract="1">New contract</button>');
+    }
+    var sorted = state.contracts.slice().sort(function (a, b) { return b.updatedAt.localeCompare(a.updatedAt); });
+    html += '<div class="card">' + sorted.map(function (c) {
+      return '<div class="list-row proposal-list-row" data-nav="#/contracts/' + c.id + '" tabindex="0" role="button" aria-label="Open contract for ' + esc(c.projectName || "Untitled contract") + '">' +
+        '<div class="list-row-main"><div class="list-row-title">' + esc(c.projectName || "Untitled contract") + '</div>' +
+        '<div class="list-row-sub">' + esc(c.clientName || "No client named") + " &middot; updated " + fmtDateShort(c.updatedAt.slice(0, 10)) + "</div></div>" +
+        (c.price ? '<span class="pill pill-neutral tabular">' + money(c.price) + "</span>" : "") +
+        "</div>";
+    }).join("") + "</div>";
+    return html;
+  }
+
+  function blankContract() {
+    var now = new Date().toISOString();
+    var last = state.contracts.length
+      ? state.contracts.slice().sort(function (a, b) { return b.createdAt.localeCompare(a.createdAt); })[0]
+      : null;
+    return {
+      id: uid("con"),
+      clientName: "",
+      clientCompany: "",
+      clientAddress: "",
+      projectName: "",
+      yourName: last ? last.yourName : "",
+      yourAddress: last ? last.yourAddress : "",
+      yourEmail: last ? last.yourEmail : "",
+      contractDate: todayISO(),
+      overview: "",
+      deliverables: [""],
+      exclusions: "",
+      startDate: "",
+      timeline: "",
+      price: "",
+      paymentTerms: "50% of the total price is due as a deposit before work begins. The remaining 50% is due on completion, before final files are handed over. Invoices are payable within 14 days.",
+      revisions: "Two rounds of revisions are included at each stage of the project. Extra rounds, or changes outside the agreed scope, are billed separately at an hourly rate agreed with the Client in advance.",
+      ownership: "Ownership of the final deliverables passes to the Client once the Developer has received payment in full. Until then, all work remains the property of the Developer. Third-party assets used in the project — fonts, stock images, plugins and similar — are licensed for the Client's use, not owned outright, and stay subject to their own licence terms.",
+      cancellation: "Either party can end this agreement by giving 14 days' written notice. The Client pays for all work completed up to that point. Any deposit already paid is non-refundable.",
+      liability: "The Developer is not liable for indirect or consequential loss arising from this project. The Developer's total liability under this agreement is capped at the total fees paid by the Client.",
+      confidentiality: "Both parties agree to keep anything shared in confidence during this project private, and not to pass it on to anyone else without permission.",
+      governingLaw: "England and Wales",
+      createdAt: now,
+      updatedAt: now
+    };
+  }
+
+  function viewContractEditor(id) {
+    var c = state.contracts.find(function (x) { return x.id === id; });
+    if (!c) return pageHead("Contract not found", "") + emptyState("This contract is gone", "", '<button class="btn" data-nav="#/contracts">Back to contracts</button>');
+
+    var html = '<button class="back-link" data-nav="#/contracts">&larr; All contracts</button>';
+    html += '<div class="page-head"><div><div class="page-eyebrow">Contract</div><h1>' + esc(c.projectName || "Untitled contract") + "</h1></div>" +
+      '<div style="display:flex;gap:8px;">' +
+      '<button class="btn btn-sm" data-download-contract="' + c.id + '">Download .md</button>' +
+      '<button class="btn btn-sm btn-danger-quiet" data-delete-contract="' + c.id + '">Delete</button>' +
+      "</div></div>";
+
+    html += '<div class="split">';
+    html += '<form class="card" style="padding:20px 22px;" id="contractForm" data-contract-id="' + c.id + '">';
+
+    html += '<label class="form-section-label">The Client</label>';
+    html += fieldRow([
+      field("Client name", "text", "c_clientName", c.clientName),
+      field("Client company (optional)", "text", "c_clientCompany", c.clientCompany)
+    ]);
+    html += textField("Client address (optional)", "c_clientAddress", c.clientAddress);
+
+    html += '<label class="form-section-label">You (the Developer)</label>';
+    html += fieldRow([
+      field("Your name / business", "text", "c_yourName", c.yourName),
+      field("Your email", "email", "c_yourEmail", c.yourEmail)
+    ]);
+    html += textField("Your address (optional)", "c_yourAddress", c.yourAddress);
+
+    html += '<label class="form-section-label">The project</label>';
+    html += fieldRow([
+      field("Project name", "text", "c_projectName", c.projectName),
+      field("Contract date", "date", "c_contractDate", c.contractDate)
+    ]);
+    html += textField("Scope of work", "c_overview", c.overview, "What you're being hired to do, in a sentence or two.");
+
+    html += '<label>Deliverables</label><div id="contractDeliverablesWrap">' +
+      c.deliverables.map(function (d, i) {
+        return '<div class="deliverable-row"><input type="text" value="' + esc(d) + '" data-contract-deliverable-index="' + i + '"><button type="button" class="icon-btn" data-remove-contract-deliverable="' + i + '" aria-label="Remove">&times;</button></div>';
+      }).join("") + "</div>" +
+      '<button type="button" class="dyn-add" id="addContractDeliverable">+ Add deliverable</button>';
+
+    html += '<div style="margin-top:14px;">' + textField("Not included (optional)", "c_exclusions", c.exclusions, "What's explicitly out of scope — e.g. hosting, copywriting, SEO.") + "</div>";
+
+    html += '<div style="margin-top:14px;">' + fieldRow([
+      field("Start date", "date", "c_startDate", c.startDate),
+      field("Timeline", "text", "c_timeline", c.timeline, "e.g. 4 weeks from kick-off")
+    ]) + "</div>";
+
+    html += '<div style="margin-top:14px;">' + field("Price (GBP)", "number", "c_price", c.price) + "</div>";
+    html += textField("Payment terms", "c_paymentTerms", c.paymentTerms, "", 3);
+    html += textField("Revisions", "c_revisions", c.revisions, "", 3);
+    html += textField("Ownership & IP", "c_ownership", c.ownership, "", 4);
+    html += textField("Cancellation", "c_cancellation", c.cancellation, "", 3);
+    html += textField("Liability", "c_liability", c.liability, "", 3);
+    html += textField("Confidentiality (optional)", "c_confidentiality", c.confidentiality, "", 3);
+    html += field("Governing law", "text", "c_governingLaw", c.governingLaw);
+    html += "</form>";
+
+    html += '<div class="card contract-preview" id="contractPreview">' + contractPreviewHTML(c) + "</div>";
+    html += "</div>";
+    return html;
+  }
+
+  function contractPreviewHTML(c) {
+    var deliverables = c.deliverables.filter(function (d) { return d && d.trim(); });
+    var clientLabel = esc(c.clientName || "—") + (c.clientCompany ? " (" + esc(c.clientCompany) + ")" : "");
+    var html = '<h2>' + esc(c.projectName || "Project agreement") + "</h2>" +
+      '<div class="p-meta">Between ' + esc(c.yourName || "—") + " and " + clientLabel + " &middot; " + fmtDate(c.contractDate || todayISO()) + "</div>";
+    html += "<h3>Parties</h3><p>This agreement is between <strong>" + esc(c.yourName || "the Developer") + '</strong> ("the Developer")' +
+      (c.yourAddress ? ", of " + esc(c.yourAddress) : "") + ", and <strong>" + esc(c.clientName || "the Client") + "</strong>" +
+      (c.clientCompany ? " of " + esc(c.clientCompany) : "") + ' ("the Client")' + (c.clientAddress ? ", of " + esc(c.clientAddress) : "") + ".</p>";
+    if (c.overview) html += "<h3>Scope of work</h3><p>" + esc(c.overview) + "</p>";
+    if (deliverables.length) html += "<h3>Deliverables</h3><ul>" + deliverables.map(function (d) { return "<li>" + esc(d) + "</li>"; }).join("") + "</ul>";
+    if (c.exclusions) html += "<h3>Not included</h3><p>" + esc(c.exclusions) + "</p>";
+    if (c.startDate || c.timeline) {
+      html += "<h3>Timeline</h3><p>" + (c.startDate ? "Starting " + fmtDate(c.startDate) + ". " : "") + esc(c.timeline || "") + "</p>";
+    }
+    if (c.price) html += "<h3>Fees</h3><p>" + money(c.price) + (c.paymentTerms ? "\n" + esc(c.paymentTerms) : "") + "</p>";
+    if (c.revisions) html += "<h3>Revisions</h3><p>" + esc(c.revisions) + "</p>";
+    if (c.ownership) html += "<h3>Ownership &amp; IP</h3><p>" + esc(c.ownership) + "</p>";
+    if (c.cancellation) html += "<h3>Cancellation</h3><p>" + esc(c.cancellation) + "</p>";
+    if (c.liability) html += "<h3>Liability</h3><p>" + esc(c.liability) + "</p>";
+    if (c.confidentiality) html += "<h3>Confidentiality</h3><p>" + esc(c.confidentiality) + "</p>";
+    html += "<h3>Governing law</h3><p>This agreement is governed by the law of " + esc(c.governingLaw || "England and Wales") + ".</p>";
+    html += "<h3>Agreed</h3><p>Client: ______________________&nbsp;&nbsp;&nbsp;Date: __________<br>" + esc(c.clientName || "") + "</p>" +
+      "<p>Developer: ______________________&nbsp;&nbsp;&nbsp;Date: __________<br>" + esc(c.yourName || "") + "</p>";
+    return html;
+  }
+
+  function contractMarkdown(c) {
+    var deliverables = c.deliverables.filter(function (d) { return d && d.trim(); });
+    var lines = [];
+    lines.push("# " + (c.projectName || "Project agreement"));
+    lines.push("Between " + (c.yourName || "—") + " and " + (c.clientName || "—") + (c.clientCompany ? " (" + c.clientCompany + ")" : "") + " · " + fmtDate(c.contractDate || todayISO()));
+    lines.push("");
+    lines.push("## Parties");
+    lines.push("This agreement is between **" + (c.yourName || "the Developer") + '** ("the Developer")' +
+      (c.yourAddress ? ", of " + c.yourAddress : "") + ", and **" + (c.clientName || "the Client") + "**" +
+      (c.clientCompany ? " of " + c.clientCompany : "") + ' ("the Client")' + (c.clientAddress ? ", of " + c.clientAddress : "") + ".");
+    lines.push("");
+    if (c.overview) { lines.push("## Scope of work", c.overview, ""); }
+    if (deliverables.length) {
+      lines.push("## Deliverables");
+      deliverables.forEach(function (d) { lines.push("- " + d); });
+      lines.push("");
+    }
+    if (c.exclusions) { lines.push("## Not included", c.exclusions, ""); }
+    if (c.startDate || c.timeline) {
+      lines.push("## Timeline", ((c.startDate ? "Starting " + fmtDate(c.startDate) + ". " : "") + (c.timeline || "")).trim(), "");
+    }
+    if (c.price) { lines.push("## Fees", money(c.price), c.paymentTerms || "", ""); }
+    if (c.revisions) { lines.push("## Revisions", c.revisions, ""); }
+    if (c.ownership) { lines.push("## Ownership & IP", c.ownership, ""); }
+    if (c.cancellation) { lines.push("## Cancellation", c.cancellation, ""); }
+    if (c.liability) { lines.push("## Liability", c.liability, ""); }
+    if (c.confidentiality) { lines.push("## Confidentiality", c.confidentiality, ""); }
+    lines.push("## Governing law", "This agreement is governed by the law of " + (c.governingLaw || "England and Wales") + ".", "");
+    lines.push("## Agreed");
+    lines.push("Client: ______________________  Date: __________");
+    lines.push(c.clientName || "");
+    lines.push("");
+    lines.push("Developer: ______________________  Date: __________");
+    lines.push(c.yourName || "");
     return lines.join("\n");
   }
 
@@ -1793,6 +1983,46 @@
       return;
     }
 
+    if ((el = e.target.closest("[data-new-contract]"))) {
+      var ncn = blankContract();
+      mutate(function () { state.contracts.push(ncn); });
+      navigate("#/contracts/" + ncn.id);
+      return;
+    }
+    if ((el = e.target.closest("[data-delete-contract]"))) {
+      var conId = el.getAttribute("data-delete-contract");
+      confirmAction("Delete this contract?", {
+        title: "Delete contract",
+        confirmLabel: "Delete contract",
+        danger: true,
+        onConfirm: function () {
+          mutate(function () { state.contracts = state.contracts.filter(function (x) { return x.id !== conId; }); });
+          navigate("#/contracts");
+          showToast("Contract deleted");
+        }
+      });
+      return;
+    }
+    if ((el = e.target.closest("[data-download-contract]"))) {
+      var dcId = el.getAttribute("data-download-contract");
+      var dc = state.contracts.find(function (x) { return x.id === dcId; });
+      downloadFile((dc.projectName || "contract").toLowerCase().replace(/[^a-z0-9]+/g, "-") + ".md", contractMarkdown(dc), "text/markdown");
+      showToast("Contract downloaded");
+      return;
+    }
+    if ((el = e.target.closest("[data-remove-contract-deliverable]"))) {
+      var conForm = document.getElementById("contractForm");
+      var cid2 = conForm.getAttribute("data-contract-id");
+      var con2 = state.contracts.find(function (x) { return x.id === cid2; });
+      var ri2 = Number(el.getAttribute("data-remove-contract-deliverable"));
+      commitContractForm(con2);
+      con2.deliverables.splice(ri2, 1);
+      if (!con2.deliverables.length) con2.deliverables = [""];
+      mutate(function () {});
+      navigate("#/contracts/" + cid2);
+      return;
+    }
+
     if ((el = e.target.closest("[data-mtab]"))) {
       var tabKey = el.getAttribute("data-mtab");
       document.querySelectorAll("[data-mtab]").forEach(function (b) { b.setAttribute("aria-selected", b === el); });
@@ -2036,6 +2266,27 @@
       scheduleSave();
       return;
     }
+    if (e.target.matches("[data-contract-deliverable-index]")) {
+      var conForm2 = document.getElementById("contractForm");
+      var cidD = conForm2.getAttribute("data-contract-id");
+      var conD = state.contracts.find(function (x) { return x.id === cidD; });
+      var ci = Number(e.target.getAttribute("data-contract-deliverable-index"));
+      conD.deliverables[ci] = e.target.value;
+      var cPreview = document.getElementById("contractPreview");
+      if (cPreview) cPreview.innerHTML = contractPreviewHTML(conD);
+      scheduleSave();
+      return;
+    }
+    if (e.target.matches("#contractForm input, #contractForm textarea")) {
+      var cf = document.getElementById("contractForm");
+      var cid3 = cf.getAttribute("data-contract-id");
+      var con3 = state.contracts.find(function (x) { return x.id === cid3; });
+      commitContractForm(con3);
+      var cPreview2 = document.getElementById("contractPreview");
+      if (cPreview2) cPreview2.innerHTML = contractPreviewHTML(con3);
+      scheduleSave();
+      return;
+    }
     if (e.target.matches("[data-draft-text]")) {
       var el2 = e.target;
       var foot = el2.closest(".suggestion-card").querySelector(".char-count");
@@ -2068,6 +2319,31 @@
     function val(id) { var e = document.getElementById(id); return e ? e.value : ""; }
   }
 
+  function commitContractForm(c) {
+    c.clientName = val("c_clientName");
+    c.clientCompany = val("c_clientCompany");
+    c.clientAddress = val("c_clientAddress");
+    c.yourName = val("c_yourName");
+    c.yourEmail = val("c_yourEmail");
+    c.yourAddress = val("c_yourAddress");
+    c.projectName = val("c_projectName");
+    c.contractDate = val("c_contractDate");
+    c.overview = val("c_overview");
+    c.exclusions = val("c_exclusions");
+    c.startDate = val("c_startDate");
+    c.timeline = val("c_timeline");
+    c.price = val("c_price");
+    c.paymentTerms = val("c_paymentTerms");
+    c.revisions = val("c_revisions");
+    c.ownership = val("c_ownership");
+    c.cancellation = val("c_cancellation");
+    c.liability = val("c_liability");
+    c.confidentiality = val("c_confidentiality");
+    c.governingLaw = val("c_governingLaw");
+    c.updatedAt = new Date().toISOString();
+    function val(id) { var e = document.getElementById(id); return e ? e.value : ""; }
+  }
+
   document.addEventListener("click", function (e) {
     if (e.target && e.target.id === "addDeliverable") {
       var f = document.getElementById("proposalForm");
@@ -2078,6 +2354,15 @@
       mutate(function () {});
       navigate("#/proposals/" + pid4);
       // restore scroll focus roughly by re-render only (acceptable for a short form)
+    }
+    if (e.target && e.target.id === "addContractDeliverable") {
+      var cf2 = document.getElementById("contractForm");
+      var cid4 = cf2.getAttribute("data-contract-id");
+      var con4 = state.contracts.find(function (x) { return x.id === cid4; });
+      commitContractForm(con4);
+      con4.deliverables.push("");
+      mutate(function () {});
+      navigate("#/contracts/" + cid4);
     }
   });
 
