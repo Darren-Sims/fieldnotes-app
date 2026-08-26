@@ -206,6 +206,48 @@ function ensureSchema() {
           "updated_at TIMESTAMPTZ NOT NULL DEFAULT now()" +
         ")"
       );
+    })
+    .then(function () {
+      // Social content posts (the client content-approval pipeline) live in
+      // their own table rather than the app_state blob, same reasoning as
+      // attachments — but more importantly, a client approving or requesting
+      // changes on a post via a public share link writes directly to a
+      // single row here. If posts instead lived inside app_state (which is
+      // always rewritten as one full JSON document on every autosave), a
+      // client's approval and an in-app edit landing around the same time
+      // could silently clobber one another. Per-row updates avoid that.
+      return pool.query(
+        "CREATE TABLE IF NOT EXISTS content_posts (" +
+          "id TEXT PRIMARY KEY, " +
+          "project_id TEXT NOT NULL, " +
+          "platform TEXT NOT NULL DEFAULT '', " +
+          "stage TEXT NOT NULL DEFAULT 'idea', " +
+          "copy_text TEXT NOT NULL DEFAULT '', " +
+          "notes TEXT NOT NULL DEFAULT '', " +
+          "scheduled_date TEXT NOT NULL DEFAULT '', " +
+          "client_feedback TEXT NOT NULL DEFAULT '', " +
+          "posted_at TIMESTAMPTZ, " +
+          "created_at TIMESTAMPTZ NOT NULL DEFAULT now(), " +
+          "updated_at TIMESTAMPTZ NOT NULL DEFAULT now()" +
+        ")"
+      );
+    })
+    .then(function () {
+      return pool.query("CREATE INDEX IF NOT EXISTS content_posts_project_id_idx ON content_posts (project_id)");
+    })
+    .then(function () {
+      // A public, unauthenticated link onto one project's content queue —
+      // same unguessable-token pattern as contract_shares. Unlike contract
+      // shares this holds no data snapshot: content_posts is already the
+      // live source of truth, so the public page just queries it directly
+      // by project_id at request time. One row per project.
+      return pool.query(
+        "CREATE TABLE IF NOT EXISTS content_shares (" +
+          "token TEXT PRIMARY KEY, " +
+          "project_id TEXT NOT NULL UNIQUE, " +
+          "created_at TIMESTAMPTZ NOT NULL DEFAULT now()" +
+        ")"
+      );
     });
 }
 
@@ -469,6 +511,105 @@ app.get("/api/public/contract-shares/:token/pdf", function (req, res) {
     });
 });
 
+/* ====================== PUBLIC CONTENT APPROVAL LINKS ====================== */
+/* Same unguessable-token pattern as contract shares, but this one accepts
+   two writes back from an unauthenticated client: approve, or request
+   changes. Both are scoped tightly — a token only ever touches posts on
+   its own project, and only ones currently in "review" — so holding a link
+   never lets someone reach into another project or flip a post that isn't
+   actually awaiting their decision. */
+
+function projectClientInfo(projectId) {
+  return pool.query("SELECT data FROM app_state WHERE id = 1").then(function (result) {
+    var data = (result.rows[0] && result.rows[0].data) || {};
+    var projects = data.projects || [];
+    var clients = data.clients || [];
+    var project = projects.filter(function (p) { return p.id === projectId; })[0];
+    if (!project) return { projectName: "", clientName: "", clientAccent: null };
+    var client = clients.filter(function (c) { return c.id === project.clientId; })[0];
+    return {
+      projectName: project.name || "",
+      clientName: client ? client.name : "",
+      clientAccent: client ? validAccentColor(client.brandColor) : null
+    };
+  });
+}
+
+app.get("/share/content/:token", function (req, res) {
+  res.sendFile(path.join(__dirname, "public", "content-approval.html"));
+});
+
+app.get("/api/public/content-shares/:token", function (req, res) {
+  pool.query("SELECT project_id FROM content_shares WHERE token = $1", [req.params.token])
+    .then(function (result) {
+      var row = result.rows[0];
+      if (!row) return res.status(404).json({ error: "not-found" });
+      var projectId = row.project_id;
+      return Promise.all([
+        projectClientInfo(projectId),
+        pool.query(
+          "SELECT id, platform, stage, copy_text, scheduled_date, posted_at, updated_at FROM content_posts " +
+            "WHERE project_id = $1 AND stage IN ('review', 'approved', 'posted') ORDER BY updated_at DESC",
+          [projectId]
+        )
+      ]).then(function (results) {
+        var info = results[0];
+        var posts = results[1].rows.map(function (r) {
+          return {
+            id: r.id, platform: r.platform, stage: r.stage, copy: r.copy_text,
+            scheduledDate: r.scheduled_date, postedAt: r.posted_at, updatedAt: r.updated_at
+          };
+        });
+        res.json({ projectName: info.projectName, clientName: info.clientName, clientAccent: info.clientAccent, posts: posts });
+      });
+    })
+    .catch(function (err) {
+      console.error("GET /api/public/content-shares/:token failed:", err);
+      if (!res.headersSent) res.status(500).json({ error: "Could not load this content queue" });
+    });
+});
+
+app.post("/api/public/content-shares/:token/posts/:postId/approve", function (req, res) {
+  pool.query("SELECT project_id FROM content_shares WHERE token = $1", [req.params.token])
+    .then(function (result) {
+      var row = result.rows[0];
+      if (!row) return res.status(404).json({ error: "not-found" });
+      return pool.query(
+        "UPDATE content_posts SET stage = 'approved', client_feedback = '', updated_at = now() " +
+          "WHERE id = $1 AND project_id = $2 AND stage = 'review' RETURNING id",
+        [req.params.postId, row.project_id]
+      ).then(function (updateResult) {
+        if (!updateResult.rows.length) return res.status(409).json({ error: "This post isn't awaiting approval any more — refresh the page." });
+        res.json({ ok: true });
+      });
+    })
+    .catch(function (err) {
+      console.error("POST /api/public/content-shares/:token/posts/:postId/approve failed:", err);
+      if (!res.headersSent) res.status(500).json({ error: "Could not record your approval" });
+    });
+});
+
+app.post("/api/public/content-shares/:token/posts/:postId/request-changes", function (req, res) {
+  var feedback = String((req.body && req.body.feedback) || "").slice(0, 2000);
+  pool.query("SELECT project_id FROM content_shares WHERE token = $1", [req.params.token])
+    .then(function (result) {
+      var row = result.rows[0];
+      if (!row) return res.status(404).json({ error: "not-found" });
+      return pool.query(
+        "UPDATE content_posts SET stage = 'draft', client_feedback = $1, updated_at = now() " +
+          "WHERE id = $2 AND project_id = $3 AND stage = 'review' RETURNING id",
+        [feedback, req.params.postId, row.project_id]
+      ).then(function (updateResult) {
+        if (!updateResult.rows.length) return res.status(409).json({ error: "This post isn't awaiting approval any more — refresh the page." });
+        res.json({ ok: true });
+      });
+    })
+    .catch(function (err) {
+      console.error("POST /api/public/content-shares/:token/posts/:postId/request-changes failed:", err);
+      if (!res.headersSent) res.status(500).json({ error: "Could not send your feedback" });
+    });
+});
+
 app.use(requireAuth);
 
 app.get("/", function (req, res) {
@@ -645,6 +786,118 @@ app.delete("/api/contract-shares/:contractId", function (req, res) {
     .then(function () { res.json({ ok: true }); })
     .catch(function (err) {
       console.error("DELETE /api/contract-shares/:contractId failed:", err);
+      res.status(500).json({ error: "Could not stop sharing" });
+    });
+});
+
+/* ====================== CONTENT POSTS (client social pipeline) ====================== */
+/* Posts live in their own table (see ensureSchema for why) and are fetched
+   per-project on demand, same shape as attachments. */
+
+var CONTENT_STAGES = ["idea", "draft", "review", "approved", "posted"];
+function isValidStage(s) { return CONTENT_STAGES.indexOf(s) !== -1; }
+function rowToPost(r) {
+  return {
+    id: r.id, projectId: r.project_id, platform: r.platform, stage: r.stage,
+    copy: r.copy_text, notes: r.notes, scheduledDate: r.scheduled_date,
+    clientFeedback: r.client_feedback, postedAt: r.posted_at,
+    createdAt: r.created_at, updatedAt: r.updated_at
+  };
+}
+
+app.get("/api/content-posts", function (req, res) {
+  var projectId = req.query.projectId;
+  if (!projectId) return res.status(400).json({ error: "projectId is required" });
+  pool.query("SELECT * FROM content_posts WHERE project_id = $1 ORDER BY created_at ASC", [projectId])
+    .then(function (result) { res.json(result.rows.map(rowToPost)); })
+    .catch(function (err) {
+      console.error("GET /api/content-posts failed:", err);
+      res.status(500).json({ error: "Could not load posts" });
+    });
+});
+
+app.post("/api/content-posts", function (req, res) {
+  var b = req.body || {};
+  var projectId = b.projectId;
+  if (!projectId) return res.status(400).json({ error: "projectId is required" });
+  var stage = isValidStage(b.stage) ? b.stage : "idea";
+  var id = crypto.randomUUID();
+  pool.query(
+    "INSERT INTO content_posts (id, project_id, platform, stage, copy_text, notes, scheduled_date) " +
+      "VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *",
+    [id, projectId, String(b.platform || ""), stage, String(b.copy || ""), String(b.notes || ""), String(b.scheduledDate || "")]
+  )
+    .then(function (result) { res.json(rowToPost(result.rows[0])); })
+    .catch(function (err) {
+      console.error("POST /api/content-posts failed:", err);
+      res.status(500).json({ error: "Could not create the post" });
+    });
+});
+
+app.put("/api/content-posts/:id", function (req, res) {
+  var b = req.body || {};
+  var stage = isValidStage(b.stage) ? b.stage : "idea";
+  pool.query(
+    "UPDATE content_posts SET " +
+      "platform = $1, stage = $2, copy_text = $3, notes = $4, scheduled_date = $5, client_feedback = $6, " +
+      "posted_at = CASE WHEN $2 = 'posted' AND posted_at IS NULL THEN now() WHEN $2 != 'posted' THEN NULL ELSE posted_at END, " +
+      "updated_at = now() " +
+      "WHERE id = $7 RETURNING *",
+    [String(b.platform || ""), stage, String(b.copy || ""), String(b.notes || ""), String(b.scheduledDate || ""), String(b.clientFeedback || ""), req.params.id]
+  )
+    .then(function (result) {
+      if (!result.rows.length) return res.status(404).json({ error: "Post not found" });
+      res.json(rowToPost(result.rows[0]));
+    })
+    .catch(function (err) {
+      console.error("PUT /api/content-posts/:id failed:", err);
+      res.status(500).json({ error: "Could not update the post" });
+    });
+});
+
+app.delete("/api/content-posts/:id", function (req, res) {
+  pool.query("DELETE FROM content_posts WHERE id = $1", [req.params.id])
+    .then(function () { res.json({ ok: true }); })
+    .catch(function (err) {
+      console.error("DELETE /api/content-posts/:id failed:", err);
+      res.status(500).json({ error: "Could not delete the post" });
+    });
+});
+
+app.get("/api/content-shares/:projectId", function (req, res) {
+  pool.query("SELECT token FROM content_shares WHERE project_id = $1", [req.params.projectId])
+    .then(function (result) {
+      if (!result.rows.length) return res.status(404).json({ error: "not-found" });
+      res.json({ token: result.rows[0].token });
+    })
+    .catch(function (err) {
+      console.error("GET /api/content-shares/:projectId failed:", err);
+      res.status(500).json({ error: "Could not load share status" });
+    });
+});
+
+app.post("/api/content-shares", function (req, res) {
+  var projectId = req.body && req.body.projectId;
+  if (!projectId) return res.status(400).json({ error: "projectId is required" });
+  var newToken = crypto.randomUUID();
+  pool.query(
+    "INSERT INTO content_shares (token, project_id) VALUES ($1, $2) " +
+      "ON CONFLICT (project_id) DO UPDATE SET project_id = EXCLUDED.project_id " +
+      "RETURNING token",
+    [newToken, projectId]
+  )
+    .then(function (result) { res.json({ token: result.rows[0].token }); })
+    .catch(function (err) {
+      console.error("POST /api/content-shares failed:", err);
+      res.status(500).json({ error: "Could not create the share link" });
+    });
+});
+
+app.delete("/api/content-shares/:projectId", function (req, res) {
+  pool.query("DELETE FROM content_shares WHERE project_id = $1", [req.params.projectId])
+    .then(function () { res.json({ ok: true }); })
+    .catch(function (err) {
+      console.error("DELETE /api/content-shares/:projectId failed:", err);
       res.status(500).json({ error: "Could not stop sharing" });
     });
 });

@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Content queue — Darren Sims Projects</title>
+<meta name="robots" content="noindex, nofollow">
+<link rel="icon" type="image/png" href="/logo.png" media="(prefers-color-scheme: light)">
+<link rel="icon" type="image/png" href="/logo-dark.png" media="(prefers-color-scheme: dark)">
+<link rel="apple-touch-icon" href="/logo.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Public+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ground: #f5f5f5;
+    --surface: #ffffff;
+    --surface-sunken: #ebebeb;
+    --surface-raised-shadow: 0 1px 2px rgba(10,10,10,0.06), 0 1px 1px rgba(10,10,10,0.04);
+    --border: #d4d4d4;
+    --border-interactive: #737373;
+    --text-primary: #111111;
+    --text-secondary: #404040;
+    --text-on-accent: #ffffff;
+
+    --accent: #1e2a5e;
+    --accent-strong: #141b45;
+    --accent-ring: #aebdec;
+    --accent-tint: #eef1fb;
+
+    --danger-text: #b91c1c;
+    --danger-bg: #fdeaea;
+    --success-text: #157a4a;
+    --success-bg: #e3f5eb;
+    --warn-text: #92620a;
+    --warn-bg: #fbf0dc;
+
+    --font-display: "Archivo", "Arial Black", sans-serif;
+    --font-body: "Public Sans", -apple-system, "Segoe UI", sans-serif;
+
+    --radius-sm: 5px;
+    --radius-md: 8px;
+    --radius-lg: 14px;
+    --radius-pill: 999px;
+
+    --hero-wash: radial-gradient(120% 160% at 8% -10%, #eef1fb 0%, #f6f4ee 38%, #eef7f5 68%, #f7f7f5 100%);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #0a0a0a;
+      --surface: #171717;
+      --surface-sunken: #101010;
+      --surface-raised-shadow: 0 1px 0 rgba(255,255,255,0.03), 0 4px 14px rgba(0,0,0,0.35);
+      --border: #262626;
+      --border-interactive: #666666;
+      --text-primary: #f5f5f5;
+      --text-secondary: #a3a3a3;
+      --text-on-accent: #ffffff;
+      --accent: #6f8fe0;
+      --accent-strong: #a9bcee;
+      --accent-ring: #3a4a86;
+      --accent-tint: #182038;
+      --danger-text: #f3a6a6;
+      --danger-bg: #2a0f0f;
+      --success-text: #7fe0b3;
+      --success-bg: #10261c;
+      --warn-text: #e0c27f;
+      --warn-bg: #2b2210;
+    }
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: var(--hero-wash, var(--ground));
+    color: var(--text-primary);
+    font-family: var(--font-body);
+    font-size: 15px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    padding: 32px 20px 60px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) body { background: var(--ground); }
+  }
+  h1, h2, h3 { font-family: var(--font-display); margin: 0; letter-spacing: -0.01em; }
+  p { margin: 0; }
+  a { color: var(--accent); }
+  button, textarea { font: inherit; color: inherit; }
+
+  *:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+  }
+
+  .wrap { max-width: 680px; margin: 0 auto; }
+  .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 22px; }
+  .brand-mark {
+    width: 30px; height: 30px;
+    display: grid; place-items: center;
+    flex: none;
+  }
+  .brand-mark img, .brand-mark picture { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .brand-name { font-family: var(--font-display); font-weight: 700; font-size: 16px; }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--surface-raised-shadow);
+    padding: 28px 30px;
+  }
+  @media (max-width: 560px) { .card { padding: 22px 18px; } }
+
+  .queue-head { margin-bottom: 20px; }
+  .queue-head h2 { font-size: 21px; margin-bottom: 4px; }
+  .q-meta { color: var(--text-secondary); font-size: 12.5px; }
+
+  .state-card { text-align: center; padding: 48px 30px; }
+  .state-card h1 { font-size: 18px; margin-bottom: 8px; }
+  .state-card p { color: var(--text-secondary); font-size: 13.5px; }
+
+  .post-list { display: flex; flex-direction: column; gap: 14px; }
+  .post {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 16px 18px;
+    background: var(--surface-sunken);
+  }
+  .post-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
+  .post-plat { font-weight: 700; font-size: 13.5px; }
+  .badge {
+    display: inline-flex; align-items: center;
+    padding: 3px 10px; border-radius: var(--radius-pill);
+    font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em;
+    flex: none;
+  }
+  .badge-review { background: var(--warn-bg); color: var(--warn-text); }
+  .badge-approved { background: var(--success-bg); color: var(--success-text); }
+  .badge-posted { background: var(--accent-tint); color: var(--accent); }
+
+  .post-copy { font-size: 14px; white-space: pre-wrap; margin-bottom: 8px; }
+  .post-sched { font-size: 12px; color: var(--text-secondary); margin-bottom: 10px; }
+
+  .post-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 8px 15px; border-radius: var(--radius-pill);
+    font-size: 13px; font-weight: 600; cursor: pointer;
+    border: 1.5px solid var(--accent); background: transparent; color: var(--accent);
+  }
+  .btn:hover { background: var(--accent-tint); }
+  .btn-primary { background: var(--accent); color: var(--text-on-accent); box-shadow: 0 0 0 3px var(--accent-ring); }
+  .btn-primary:hover { background: var(--accent-strong); border-color: var(--accent-strong); }
+  .btn[disabled] { opacity: 0.55; cursor: not-allowed; }
+
+  .changes-box { display: none; margin-top: 10px; }
+  .changes-box[data-open="1"] { display: block; }
+  .changes-box textarea {
+    width: 100%; min-height: 70px; resize: vertical;
+    padding: 9px 10px; border-radius: var(--radius-sm);
+    border: 1px solid var(--border-interactive);
+    background: var(--surface); color: var(--text-primary);
+    font-size: 13.5px; margin-bottom: 8px;
+  }
+
+  .fb-note { margin-top: 8px; font-size: 12.5px; color: var(--text-secondary); font-style: italic; }
+
+  .empty-note { text-align: center; padding: 24px 10px; color: var(--text-secondary); font-size: 13.5px; }
+
+  .foot-note { margin-top: 20px; font-size: 12px; color: var(--text-secondary); text-align: center; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true"><picture><source srcset="/logo-dark.png" media="(prefers-color-scheme: dark)"><img src="/logo.png" alt=""></picture></div>
+      <div class="brand-name">Darren Sims Projects</div>
+    </div>
+    <div id="content">
+      <div class="card state-card"><h1>Loading content queue…</h1></div>
+    </div>
+    <p class="foot-note" id="footNote" style="display:none;">Shared privately via Darren Sims Projects. This link doesn't require an account.</p>
+  </div>
+
+  <script>
+    (function () {
+      "use strict";
+
+      function esc(str) {
+        return String(str == null ? "" : str).replace(/[&<>"']/g, function (c) {
+          return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+        });
+      }
+      function fmtDate(iso) {
+        if (!iso) return "";
+        var d = new Date(iso + "T00:00:00");
+        if (isNaN(d.getTime())) return String(iso);
+        return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+      }
+      var STAGE_LABEL = { review: "Awaiting your approval", approved: "Approved", posted: "Posted" };
+
+      var parts = location.pathname.split("/").filter(Boolean);
+      var token = parts[parts.length - 1] || "";
+      var content = document.getElementById("content");
+      var footNote = document.getElementById("footNote");
+
+      function showState(title, body) {
+        content.innerHTML = '<div class="card state-card"><h1>' + esc(title) + "</h1><p>" + esc(body) + "</p></div>";
+      }
+
+      function postHTML(p) {
+        var badge = '<span class="badge badge-' + esc(p.stage) + '">' + esc(STAGE_LABEL[p.stage] || p.stage) + "</span>";
+        var sched = p.scheduledDate ? '<div class="post-sched">Scheduled for ' + fmtDate(p.scheduledDate) + "</div>" : "";
+        var actions = "";
+        if (p.stage === "review") {
+          actions =
+            '<div class="post-actions">' +
+              '<button type="button" class="btn btn-primary" data-approve="' + esc(p.id) + '">Approve</button>' +
+              '<button type="button" class="btn" data-toggle-changes="' + esc(p.id) + '">Request changes</button>' +
+            "</div>" +
+            '<div class="changes-box" id="changes-' + esc(p.id) + '">' +
+              '<textarea id="fb-' + esc(p.id) + '" placeholder="What would you like changed?"></textarea>' +
+              '<button type="button" class="btn btn-primary" data-send-changes="' + esc(p.id) + '">Send feedback</button>' +
+            "</div>";
+        }
+        return (
+          '<div class="post" id="post-' + esc(p.id) + '">' +
+            '<div class="post-top"><span class="post-plat">' + esc(p.platform || "Post") + "</span>" + badge + "</div>" +
+            '<div class="post-copy">' + esc(p.copy || "") + "</div>" +
+            sched +
+            actions +
+          "</div>"
+        );
+      }
+
+      function render(data) {
+        var posts = data.posts || [];
+        var accent = typeof data.clientAccent === "string" && /^#[0-9a-f]{6}$/i.test(data.clientAccent) ? data.clientAccent : "";
+        var swatch = accent ? '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + accent + ';margin-right:5px;" aria-hidden="true"></span>' : "";
+
+        var html = '<div class="card"' + (accent ? ' style="border-top:3px solid ' + accent + ';"' : "") + '>';
+        html += '<div class="queue-head"><h2>' + esc(data.projectName || "Content queue") + "</h2>" +
+          '<div class="q-meta">' + swatch + esc(data.clientName || "") + "</div></div>";
+
+        if (!posts.length) {
+          html += '<div class="empty-note">Nothing here yet. Check back once there\'s something to review.</div>';
+        } else {
+          html += '<div class="post-list">' + posts.map(postHTML).join("") + "</div>";
+        }
+        html += "</div>";
+
+        content.innerHTML = html;
+        footNote.style.display = "block";
+        wireActions();
+      }
+
+      function setPostBusy(id, busy) {
+        var post = document.getElementById("post-" + id);
+        if (!post) return;
+        var btns = post.querySelectorAll("button");
+        for (var i = 0; i < btns.length; i++) btns[i].disabled = !!busy;
+      }
+
+      function postJSON(path, body) {
+        return fetch(path, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body || {})
+        }).then(function (res) {
+          return res.json().catch(function () { return {}; }).then(function (data) {
+            if (!res.ok) throw new Error((data && data.error) || "Request failed");
+            return data;
+          });
+        });
+      }
+
+      function wireActions() {
+        var approveBtns = content.querySelectorAll("[data-approve]");
+        for (var i = 0; i < approveBtns.length; i++) {
+          approveBtns[i].addEventListener("click", function (e) {
+            var id = e.currentTarget.getAttribute("data-approve");
+            setPostBusy(id, true);
+            postJSON("/api/public/content-shares/" + encodeURIComponent(token) + "/posts/" + encodeURIComponent(id) + "/approve")
+              .then(function () { return reload(); })
+              .catch(function (err) {
+                setPostBusy(id, false);
+                alert(err.message || "Couldn't record your approval. Try again.");
+              });
+          });
+        }
+        var toggleBtns = content.querySelectorAll("[data-toggle-changes]");
+        for (var j = 0; j < toggleBtns.length; j++) {
+          toggleBtns[j].addEventListener("click", function (e) {
+            var id = e.currentTarget.getAttribute("data-toggle-changes");
+            var box = document.getElementById("changes-" + id);
+            if (!box) return;
+            var open = box.getAttribute("data-open") === "1";
+            box.setAttribute("data-open", open ? "0" : "1");
+            if (!open) {
+              var ta = document.getElementById("fb-" + id);
+              if (ta) ta.focus();
+            }
+          });
+        }
+        var sendBtns = content.querySelectorAll("[data-send-changes]");
+        for (var k = 0; k < sendBtns.length; k++) {
+          sendBtns[k].addEventListener("click", function (e) {
+            var id = e.currentTarget.getAttribute("data-send-changes");
+            var ta = document.getElementById("fb-" + id);
+            var feedback = ta ? ta.value.trim() : "";
+            if (!feedback) {
+              if (ta) ta.focus();
+              return;
+            }
+            setPostBusy(id, true);
+            postJSON("/api/public/content-shares/" + encodeURIComponent(token) + "/posts/" + encodeURIComponent(id) + "/request-changes", { feedback: feedback })
+              .then(function () { return reload(); })
+              .catch(function (err) {
+                setPostBusy(id, false);
+                alert(err.message || "Couldn't send your feedback. Try again.");
+              });
+          });
+        }
+      }
+
+      function reload() {
+        return fetch("/api/public/content-shares/" + encodeURIComponent(token), { cache: "no-store" })
+          .then(function (res) {
+            if (!res.ok) throw new Error("load-failed");
+            return res.json();
+          })
+          .then(function (result) { render(result || {}); });
+      }
+
+      if (!token) {
+        showState("Link not found", "This link is missing its content queue reference.");
+        return;
+      }
+
+      fetch("/api/public/content-shares/" + encodeURIComponent(token), { cache: "no-store" })
+        .then(function (res) {
+          if (res.status === 404) { showState("This link isn't valid", "It may have been removed, or never existed."); throw new Error("handled"); }
+          if (!res.ok) throw new Error("load-failed");
+          return res.json();
+        })
+        .then(function (result) { render(result || {}); })
+        .catch(function (err) {
+          if (err && err.message === "handled") return;
+          showState("Couldn't load this content queue", "Check your connection and try refreshing the page.");
+        });
+    })();
+  </script>
+</body>
+</html>

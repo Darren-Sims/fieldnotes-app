@@ -603,6 +603,13 @@
     { key: "doing", label: "Doing" },
     { key: "done", label: "Done" }
   ];
+  var CONTENT_STAGES = [
+    { key: "idea", label: "Idea", cls: "pill-neutral" },
+    { key: "draft", label: "Draft", cls: "pill-neutral" },
+    { key: "review", label: "Awaiting approval", cls: "pill-warning" },
+    { key: "approved", label: "Approved", cls: "pill-success" },
+    { key: "posted", label: "Posted", cls: "pill-accent" }
+  ];
 
   function esc(str) {
     return String(str == null ? "" : str).replace(/[&<>"']/g, function (c) {
@@ -1083,6 +1090,10 @@
     html += '<div class="section-head"><h2>Contract</h2></div>';
     html += contractSectionHTML(p);
 
+    loadContentPosts(p.id);
+    html += '<div class="section-head"><h2>Content</h2></div>';
+    html += contentSectionHTML(p);
+
     loadFileAttachments(p.id);
     html += '<div class="section-head"><h2>Attachments</h2></div>';
     html += attachmentsSectionHTML(p);
@@ -1119,6 +1130,189 @@
       .catch(function () {
         fileAttachmentsCache[projectId] = []; // fail quiet rather than block the page — worst case the list looks empty until the project is reopened
       });
+  }
+
+  /* ---- Content pipeline (Buffer-style ideas/drafts/approvals/posted) ----
+   * Like file attachments, posts live in their own database table rather
+   * than the autosaved app_state blob — a client approving a post needs to
+   * write back safely without risking clobbering whatever's being edited
+   * in-app at the same time. Fetched per-project on demand and cached here,
+   * same pattern as fileAttachmentsCache above. contentShareCache tracks
+   * whether a project currently has an active client-approval link. */
+
+  var contentPostsCache = {}; // projectId -> array once loaded, null while loading, undefined before first request
+  var contentShareCache = {}; // projectId -> token string, or null (not shared), or undefined (not yet loaded)
+
+  function loadContentPosts(projectId) {
+    if (contentPostsCache[projectId] !== undefined) return;
+    contentPostsCache[projectId] = null;
+    Promise.all([
+      fetch("/api/content-posts?projectId=" + encodeURIComponent(projectId), { cache: "no-store" }).then(function (res) {
+        if (!res.ok) throw new Error("load-failed");
+        return res.json();
+      }),
+      fetch("/api/content-shares/" + encodeURIComponent(projectId), { cache: "no-store" }).then(function (res) {
+        if (res.status === 404) return null;
+        if (!res.ok) throw new Error("load-failed");
+        return res.json().then(function (d) { return d.token; });
+      })
+    ])
+      .then(function (results) {
+        contentPostsCache[projectId] = results[0];
+        contentShareCache[projectId] = results[1];
+        render();
+      })
+      .catch(function () {
+        contentPostsCache[projectId] = []; // fail quiet rather than block the page — worst case the list looks empty until the project is reopened
+        contentShareCache[projectId] = null;
+      });
+  }
+
+  function saveContentPost(projectId, postId, patch, dlg) {
+    fetch("/api/content-posts/" + postId, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch)
+    })
+      .then(function (res) {
+        if (res.status === 401) { window.location.href = "/login"; throw new Error("unauthorized"); }
+        if (!res.ok) throw new Error("save-failed");
+        return res.json();
+      })
+      .then(function (saved) {
+        var list = contentPostsCache[projectId] || [];
+        contentPostsCache[projectId] = list.map(function (x) { return x.id === postId ? saved : x; });
+        if (dlg) dlg.close();
+        showToast("Post updated");
+        render();
+      })
+      .catch(function (err) {
+        if (err && err.message === "unauthorized") return;
+        showToast("Couldn't save that post — try again");
+      });
+  }
+
+  function deleteContentPost(projectId, postId) {
+    fetch("/api/content-posts/" + postId, { method: "DELETE" })
+      .then(function (res) {
+        if (res.status === 401) { window.location.href = "/login"; throw new Error("unauthorized"); }
+        if (!res.ok) throw new Error("delete-failed");
+        var list = contentPostsCache[projectId] || [];
+        contentPostsCache[projectId] = list.filter(function (x) { return x.id !== postId; });
+        showToast("Post deleted");
+        render();
+      })
+      .catch(function (err) {
+        if (err && err.message === "unauthorized") return;
+        showToast("Couldn't delete that post — try again");
+      });
+  }
+
+  function contentShareCardInner(p) {
+    var token = contentShareCache[p.id];
+    if (!token) {
+      return '<p class="hint" style="margin-bottom:10px;">Share this project\'s content queue with your client so they can approve posts without an account.</p>' +
+        '<button type="button" class="btn btn-sm" data-share-content="' + p.id + '">Create share link</button>';
+    }
+    var url = location.origin + "/share/content/" + token;
+    return '<p class="hint" style="margin-bottom:8px;">Anyone with this link can review posts awaiting approval, and approve or request changes. It updates automatically.</p>' +
+      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' +
+      '<input type="text" readonly value="' + esc(url) + '" style="flex:1;min-width:220px;font-family:var(--font-mono);font-size:12.5px;" onclick="this.select()">' +
+      '<button type="button" class="btn btn-sm" data-copy-share-link="' + esc(url) + '">Copy link</button>' +
+      '<button type="button" class="btn btn-sm btn-danger-quiet" data-stop-share-content="' + p.id + '">Stop sharing</button>' +
+      "</div>";
+  }
+
+  function contentPostRowHTML(post, projectId) {
+    var stageIdx = CONTENT_STAGES.findIndex(function (s) { return s.key === post.stage; });
+    var stage = CONTENT_STAGES[stageIdx] || CONTENT_STAGES[0];
+    var feedback = post.clientFeedback
+      ? '<div class="list-row-sub" style="margin-top:4px;">Client feedback: ' + esc(post.clientFeedback) + "</div>"
+      : "";
+    return '<div class="list-row" style="align-items:flex-start;padding:10px 14px;">' +
+      '<div class="list-row-main">' +
+      '<div class="list-row-title">' + (post.platform ? esc(post.platform) + " &middot; " : "") + '<span class="pill ' + stage.cls + '">' + stage.label + "</span></div>" +
+      '<div class="list-row-sub" style="white-space:pre-wrap;">' + esc(post.copy || "(no copy yet)") + "</div>" +
+      (post.scheduledDate ? '<div class="list-row-sub">Scheduled ' + fmtDateShort(post.scheduledDate) + "</div>" : "") +
+      feedback +
+      "</div>" +
+      '<div style="display:flex;gap:2px;flex:none;">' +
+      (stageIdx > 0 ? '<button type="button" class="icon-btn" title="Move back" data-content-move="' + post.id + '" data-content-project="' + projectId + '" data-dir="-1">&larr;</button>' : "") +
+      (stageIdx < CONTENT_STAGES.length - 1 ? '<button type="button" class="icon-btn" title="Move forward" data-content-move="' + post.id + '" data-content-project="' + projectId + '" data-dir="1">&rarr;</button>' : "") +
+      '<button type="button" class="icon-btn" title="Edit" data-open-content-post="' + post.id + '" data-content-project="' + projectId + '">Edit</button>' +
+      '<button type="button" class="icon-btn" title="Delete" data-delete-content-post="' + post.id + '" data-content-project="' + projectId + '">Delete</button>' +
+      "</div></div>";
+  }
+
+  function contentSectionHTML(p) {
+    var cached = contentPostsCache[p.id];
+    var loading = cached == null;
+    var posts = (cached || []).slice().sort(function (a, b) {
+      var ai = CONTENT_STAGES.findIndex(function (s) { return s.key === a.stage; });
+      var bi = CONTENT_STAGES.findIndex(function (s) { return s.key === b.stage; });
+      if (ai !== bi) return ai - bi;
+      return new Date(b.createdAt) - new Date(a.createdAt);
+    });
+
+    var html = '<div class="card" id="contentShareCard" style="padding:14px 18px;margin-bottom:16px;">' + contentShareCardInner(p) + "</div>";
+
+    html += '<div class="card" style="padding:16px 18px;">' +
+      '<p class="hint" style="margin-bottom:10px;">Log an idea, then move it through Draft, Review, Approved and Posted as it comes together. No posting happens automatically — this just tracks where each one is.</p>' +
+      '<div class="field" style="margin-bottom:8px;"><label for="cp_platform_' + p.id + '">Platform (optional)</label>' +
+      '<input type="text" id="cp_platform_' + p.id + '" placeholder="e.g. Instagram" data-content-platform-input="' + p.id + '"></div>' +
+      '<div class="field" style="margin-bottom:8px;"><label for="cp_copy_' + p.id + '">Idea or draft copy</label>' +
+      '<textarea id="cp_copy_' + p.id + '" rows="2" placeholder="What\'s the post about" data-content-copy-input="' + p.id + '"></textarea></div>' +
+      '<button type="button" class="btn btn-sm" data-add-content-post="' + p.id + '">Add to queue</button>' +
+      "</div>";
+
+    if (loading) {
+      html += '<p class="hint" style="margin-top:14px;">Loading…</p>';
+    } else if (!posts.length) {
+      html += '<p class="hint" style="margin-top:14px;">No posts yet — add an idea above to start the queue.</p>';
+    } else {
+      html += '<div class="card" style="padding:8px 4px;margin-top:12px;">' + posts.map(function (post) { return contentPostRowHTML(post, p.id); }).join("") + "</div>";
+    }
+    return html;
+  }
+
+  function openContentPostModal(postId, projectId) {
+    var list = contentPostsCache[projectId] || [];
+    var post = list.find(function (x) { return x.id === postId; });
+    if (!post) return;
+    var stageOptions = CONTENT_STAGES.map(function (s) {
+      return '<option value="' + s.key + '"' + (s.key === post.stage ? " selected" : "") + '>' + esc(s.label) + "</option>";
+    }).join("");
+    var body = '<div class="field-row">' +
+      '<div class="field"><label for="cp_m_platform">Platform</label><input type="text" id="cp_m_platform" value="' + esc(post.platform || "") + '"></div>' +
+      '<div class="field"><label for="cp_m_stage">Stage</label><select id="cp_m_stage">' + stageOptions + "</select></div>" +
+      "</div>" +
+      '<div class="field"><label for="cp_m_copy">Copy</label><textarea id="cp_m_copy" rows="4">' + esc(post.copy || "") + "</textarea></div>" +
+      '<div class="field"><label for="cp_m_sched">Scheduled date</label><input type="date" id="cp_m_sched" value="' + esc(post.scheduledDate || "") + '"></div>' +
+      '<div class="field"><label for="cp_m_notes">Notes (internal only)</label><textarea id="cp_m_notes" rows="2">' + esc(post.notes || "") + "</textarea></div>" +
+      (post.clientFeedback ? '<p class="hint" style="margin-bottom:10px;">Client feedback: ' + esc(post.clientFeedback) + "</p>" : "") +
+      '<div class="dialog-actions"><button type="button" class="btn btn-danger-quiet" id="deleteContentPostBtn">Delete</button><span style="flex:1"></span><button type="button" class="btn" data-close-dialog="1">Cancel</button><button type="button" class="btn btn-primary" id="saveContentPostBtn">Save</button></div>';
+    var dlg = openDialog("Edit post", body);
+    dlg.querySelector("#saveContentPostBtn").addEventListener("click", function () {
+      saveContentPost(projectId, postId, {
+        platform: document.getElementById("cp_m_platform").value.trim(),
+        stage: document.getElementById("cp_m_stage").value,
+        copy: document.getElementById("cp_m_copy").value,
+        scheduledDate: document.getElementById("cp_m_sched").value,
+        notes: document.getElementById("cp_m_notes").value,
+        clientFeedback: post.clientFeedback || ""
+      }, dlg);
+    });
+    dlg.querySelector("#deleteContentPostBtn").addEventListener("click", function () {
+      confirmAction("Delete this post?", {
+        title: "Delete post",
+        confirmLabel: "Delete post",
+        danger: true,
+        onConfirm: function () {
+          deleteContentPost(projectId, postId);
+          dlg.close();
+        }
+      });
+    });
   }
 
   function formatFileSize(bytes) {
@@ -2405,6 +2599,121 @@
             .catch(function (err) {
               if (err && err.message === "unauthorized") return;
               showToast("Couldn't remove that file — try again");
+            });
+        }
+      });
+      return;
+    }
+
+    if ((el = e.target.closest("[data-add-content-post]"))) {
+      var addCpProjId = el.getAttribute("data-add-content-post");
+      var platEl = document.querySelector('[data-content-platform-input="' + addCpProjId + '"]');
+      var copyEl = document.querySelector('[data-content-copy-input="' + addCpProjId + '"]');
+      var newPlatform = platEl ? platEl.value.trim() : "";
+      var newCopy = copyEl ? copyEl.value.trim() : "";
+      if (!newCopy) { if (copyEl) copyEl.focus(); return; }
+      el.disabled = true;
+      fetch("/api/content-posts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId: addCpProjId, platform: newPlatform, copy: newCopy, stage: "idea" })
+      })
+        .then(function (res) {
+          if (res.status === 401) { window.location.href = "/login"; throw new Error("unauthorized"); }
+          if (!res.ok) throw new Error("create-failed");
+          return res.json();
+        })
+        .then(function (saved) {
+          var list = contentPostsCache[addCpProjId] || [];
+          contentPostsCache[addCpProjId] = list.concat([saved]);
+          showToast("Added to queue");
+          render();
+        })
+        .catch(function (err) {
+          if (err && err.message === "unauthorized") return;
+          showToast("Couldn't add that post — try again");
+        })
+        .then(function () { el.disabled = false; });
+      return;
+    }
+    if ((el = e.target.closest("[data-content-move]"))) {
+      var cmId = el.getAttribute("data-content-move");
+      var cmProjId = el.getAttribute("data-content-project");
+      var cmDir = Number(el.getAttribute("data-dir"));
+      var cmList = contentPostsCache[cmProjId] || [];
+      var cmPost = cmList.find(function (x) { return x.id === cmId; });
+      if (!cmPost) return;
+      var cmIdx = CONTENT_STAGES.findIndex(function (s) { return s.key === cmPost.stage; });
+      var cmNext = CONTENT_STAGES[cmIdx + cmDir];
+      if (!cmNext) return;
+      saveContentPost(cmProjId, cmId, {
+        platform: cmPost.platform,
+        stage: cmNext.key,
+        copy: cmPost.copy,
+        scheduledDate: cmPost.scheduledDate,
+        notes: cmPost.notes,
+        clientFeedback: cmPost.clientFeedback
+      });
+      return;
+    }
+    if ((el = e.target.closest("[data-open-content-post]"))) {
+      openContentPostModal(el.getAttribute("data-open-content-post"), el.getAttribute("data-content-project"));
+      return;
+    }
+    if ((el = e.target.closest("[data-delete-content-post]"))) {
+      var dcpId = el.getAttribute("data-delete-content-post");
+      var dcpProjId = el.getAttribute("data-content-project");
+      confirmAction("Delete this post?", {
+        title: "Delete post",
+        confirmLabel: "Delete post",
+        danger: true,
+        onConfirm: function () { deleteContentPost(dcpProjId, dcpId); }
+      });
+      return;
+    }
+    if ((el = e.target.closest("[data-share-content]"))) {
+      var scProjId = el.getAttribute("data-share-content");
+      el.disabled = true;
+      fetch("/api/content-shares", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId: scProjId })
+      })
+        .then(function (res) {
+          if (res.status === 401) { window.location.href = "/login"; throw new Error("unauthorized"); }
+          if (!res.ok) throw new Error("share-failed");
+          return res.json();
+        })
+        .then(function (result) {
+          contentShareCache[scProjId] = result.token;
+          showToast("Share link created");
+          render();
+        })
+        .catch(function (err) {
+          el.disabled = false;
+          if (err && err.message === "unauthorized") return;
+          showToast("Couldn't create a share link — try again");
+        });
+      return;
+    }
+    if ((el = e.target.closest("[data-stop-share-content]"))) {
+      var ssProjId = el.getAttribute("data-stop-share-content");
+      confirmAction("Stop sharing this content queue? The link will stop working.", {
+        title: "Stop sharing",
+        confirmLabel: "Stop sharing",
+        danger: true,
+        onConfirm: function () {
+          fetch("/api/content-shares/" + ssProjId, { method: "DELETE" })
+            .then(function (res) {
+              if (res.status === 401) { window.location.href = "/login"; throw new Error("unauthorized"); }
+              if (!res.ok) throw new Error("unshare-failed");
+              contentShareCache[ssProjId] = null;
+              showToast("Link stopped");
+              render();
+            })
+            .catch(function (err) {
+              if (err && err.message === "unauthorized") return;
+              showToast("Couldn't stop sharing — try again");
             });
         }
       });
