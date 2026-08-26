@@ -1,5 +1,7 @@
 <meta charset="utf-8">
-<title>Fieldnotes</title>
+<title>Darren Sims Projects</title>
+<link rel="icon" type="image/png" href="/logo.png">
+<link rel="apple-touch-icon" href="/logo.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Public+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -153,12 +155,11 @@
     padding: 2px 8px;
   }
   .brand-mark {
-    width: 30px; height: 30px; border-radius: 8px;
-    background: var(--accent);
+    width: 30px; height: 30px;
     display: grid; place-items: center;
-    color: #fff; font-family: var(--font-display); font-weight: 800; font-size: 15px;
     flex: none;
   }
+  .brand-mark img { width: 100%; height: 100%; object-fit: contain; }
   .brand-name { font-family: var(--font-display); font-weight: 700; font-size: 17px; }
   .brand-sub { font-size: 11px; color: var(--text-secondary); margin-top: -2px; }
 
@@ -724,8 +725,8 @@
     }
     return '' +
       '<nav class="rail" aria-label="Primary">' +
-      '<div class="brand"><div class="brand-mark" aria-hidden="true">F</div><div>' +
-      '<div class="brand-name">Fieldnotes</div><div class="brand-sub">Studio ops</div>' +
+      '<div class="brand"><div class="brand-mark" aria-hidden="true"><img src="/logo.png" alt=""></div><div>' +
+      '<div class="brand-name">Darren Sims Projects</div><div class="brand-sub">Studio ops</div>' +
       "</div></div>" +
       '<div class="nav-group">' +
       link("overview", "Overview") +
@@ -1730,7 +1731,7 @@
       '<div class="hint" id="lastBackupLine">' + esc(lastLine) + "</div></div>" +
       '<div class="field" style="margin-top:18px;"><label for="importFileInput">Restore from a backup file</label>' +
       '<input type="file" id="importFileInput" accept="application/json,.json">' +
-      '<div class="hint">This replaces everything currently in Fieldnotes with what\'s in the file. There\'s no undo — export a fresh backup first if you\'re not sure.</div></div>' +
+      '<div class="hint">This replaces everything currently in Darren Sims Projects with what\'s in the file. There\'s no undo — export a fresh backup first if you\'re not sure.</div></div>' +
       '<div class="dialog-actions"><button type="button" class="btn" data-close-dialog="1">Close</button></div>';
     var dlg = openDialog("Backup data", body);
 
@@ -1753,12 +1754,12 @@
         try { parsed = JSON.parse(reader.result); }
         catch (err) { showToast("That file isn't valid JSON"); return; }
         if (!parsed || !Array.isArray(parsed.clients) || !Array.isArray(parsed.projects) || !Array.isArray(parsed.tasks)) {
-          showToast("That doesn't look like a Fieldnotes backup file");
+          showToast("That doesn't look like a Darren Sims Projects backup file");
           return;
         }
         var counts = "(" + parsed.clients.length + " clients, " + parsed.projects.length + " projects, " + parsed.tasks.length + " tasks)";
         var fileInput = e.target;
-        confirmAction("Replace everything currently in Fieldnotes with this backup " + counts + "? This can't be undone.", {
+        confirmAction("Replace everything currently in Darren Sims Projects with this backup " + counts + "? This can't be undone.", {
           title: "Restore backup",
           confirmLabel: "Replace everything",
           danger: true,

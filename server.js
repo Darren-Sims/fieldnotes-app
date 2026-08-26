@@ -329,6 +329,16 @@ app.use(express.urlencoded({ extended: false }));
 
 app.get("/healthz", function (req, res) { res.status(200).send("ok"); });
 
+// The brand logo — used as the favicon and as the small mark shown on
+// every page (login, reset, share links, the app itself). Public and
+// unauthenticated on purpose: it needs to load on the logged-out pages.
+app.get("/logo.png", function (req, res) {
+  res.sendFile(path.join(__dirname, "public", "logo.png"));
+});
+app.get("/favicon.ico", function (req, res) {
+  res.sendFile(path.join(__dirname, "public", "logo.png"));
+});
+
 app.get("/login", function (req, res) {
   var token = req.cookies && req.cookies[COOKIE_NAME];
   if (!token) return res.sendFile(path.join(__dirname, "public", "login.html"));
