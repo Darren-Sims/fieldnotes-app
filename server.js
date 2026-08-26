@@ -335,6 +335,9 @@ app.get("/healthz", function (req, res) { res.status(200).send("ok"); });
 app.get("/logo.png", function (req, res) {
   res.sendFile(path.join(__dirname, "public", "logo.png"));
 });
+app.get("/logo-dark.png", function (req, res) {
+  res.sendFile(path.join(__dirname, "public", "logo-dark.png"));
+});
 app.get("/favicon.ico", function (req, res) {
   res.sendFile(path.join(__dirname, "public", "logo.png"));
 });
