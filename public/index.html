@@ -372,6 +372,26 @@
   }
   .task-add-input::placeholder { color: var(--text-secondary); }
 
+  .content-board { display: flex; gap: 14px; margin-top: 10px; overflow-x: auto; padding-bottom: 8px; align-items: start; }
+  .content-col { background: var(--surface-sunken); border-radius: var(--radius-lg); padding: 12px; min-width: 210px; flex: 1 0 210px; }
+  .content-card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md);
+    padding: 10px 11px; margin-bottom: 8px; font-size: 13px;
+  }
+  .content-card:hover { border-color: var(--border-interactive); }
+  .content-card:last-child { margin-bottom: 0; }
+  .content-card-sched { font-size: 11px; color: var(--text-secondary); font-family: var(--font-mono); margin-top: 6px; }
+  .content-card-feedback { font-size: 11.5px; color: var(--danger-text); margin-top: 6px; }
+  .content-card-foot { display: flex; align-items: center; justify-content: flex-end; gap: 2px; margin-top: 6px; }
+  .content-add-row { padding: 4px; }
+  .content-add-input {
+    width: 100%; border: 1px dashed var(--border-interactive); background: var(--surface);
+    border-radius: var(--radius-md); padding: 8px 9px; font-size: 13px; color: var(--text-primary);
+    resize: vertical; font-family: inherit; margin-bottom: 6px;
+  }
+  .content-add-input::placeholder { color: var(--text-secondary); }
+  @media (max-width: 780px) { .content-col { min-width: 190px; } }
+
   .note-type-tabs { display: flex; gap: 6px; margin-bottom: 12px; }
   .note-log { margin-top: 8px; }
   .note-item { padding: 12px 0; border-bottom: 1px solid var(--border); display: flex; gap: 10px; }
@@ -604,11 +624,11 @@
     { key: "done", label: "Done" }
   ];
   var CONTENT_STAGES = [
-    { key: "idea", label: "Idea", cls: "pill-neutral" },
-    { key: "draft", label: "Draft", cls: "pill-neutral" },
-    { key: "review", label: "Awaiting approval", cls: "pill-warning" },
-    { key: "approved", label: "Approved", cls: "pill-success" },
-    { key: "posted", label: "Posted", cls: "pill-accent" }
+    { key: "idea", label: "Idea" },
+    { key: "draft", label: "Draft" },
+    { key: "review", label: "Review" },
+    { key: "approved", label: "Approved" },
+    { key: "posted", label: "Posted" }
   ];
 
   function esc(str) {
@@ -1223,55 +1243,44 @@
       "</div>";
   }
 
-  function contentPostRowHTML(post, projectId) {
-    var stageIdx = CONTENT_STAGES.findIndex(function (s) { return s.key === post.stage; });
-    var stage = CONTENT_STAGES[stageIdx] || CONTENT_STAGES[0];
-    var feedback = post.clientFeedback
-      ? '<div class="list-row-sub" style="margin-top:4px;">Client feedback: ' + esc(post.clientFeedback) + "</div>"
-      : "";
-    return '<div class="list-row" style="align-items:flex-start;padding:10px 14px;">' +
-      '<div class="list-row-main">' +
-      '<div class="list-row-title">' + (post.platform ? esc(post.platform) + " &middot; " : "") + '<span class="pill ' + stage.cls + '">' + stage.label + "</span></div>" +
-      '<div class="list-row-sub" style="white-space:pre-wrap;">' + esc(post.copy || "(no copy yet)") + "</div>" +
-      (post.scheduledDate ? '<div class="list-row-sub">Scheduled ' + fmtDateShort(post.scheduledDate) + "</div>" : "") +
-      feedback +
-      "</div>" +
-      '<div style="display:flex;gap:2px;flex:none;">' +
+  function contentCardHTML(post, projectId, stageIdx) {
+    var sched = post.scheduledDate ? '<div class="content-card-sched">' + fmtDateShort(post.scheduledDate) + "</div>" : "";
+    var feedback = post.clientFeedback ? '<div class="content-card-feedback">Feedback: ' + esc(post.clientFeedback) + "</div>" : "";
+    return '<div class="content-card">' +
+      '<button type="button" class="task-card-title" data-open-content-post="' + post.id + '" data-content-project="' + projectId + '">' + esc(post.copy || "(no copy yet)") + "</button>" +
+      sched + feedback +
+      '<div class="content-card-foot">' +
       (stageIdx > 0 ? '<button type="button" class="icon-btn" title="Move back" data-content-move="' + post.id + '" data-content-project="' + projectId + '" data-dir="-1">&larr;</button>' : "") +
       (stageIdx < CONTENT_STAGES.length - 1 ? '<button type="button" class="icon-btn" title="Move forward" data-content-move="' + post.id + '" data-content-project="' + projectId + '" data-dir="1">&rarr;</button>' : "") +
-      '<button type="button" class="icon-btn" title="Edit" data-open-content-post="' + post.id + '" data-content-project="' + projectId + '">Edit</button>' +
-      '<button type="button" class="icon-btn" title="Delete" data-delete-content-post="' + post.id + '" data-content-project="' + projectId + '">Delete</button>' +
       "</div></div>";
   }
 
   function contentSectionHTML(p) {
     var cached = contentPostsCache[p.id];
     var loading = cached == null;
-    var posts = (cached || []).slice().sort(function (a, b) {
-      var ai = CONTENT_STAGES.findIndex(function (s) { return s.key === a.stage; });
-      var bi = CONTENT_STAGES.findIndex(function (s) { return s.key === b.stage; });
-      if (ai !== bi) return ai - bi;
-      return new Date(b.createdAt) - new Date(a.createdAt);
-    });
+    var posts = cached || [];
 
     var html = '<div class="card" id="contentShareCard" style="padding:14px 18px;margin-bottom:16px;">' + contentShareCardInner(p) + "</div>";
 
-    html += '<div class="card" style="padding:16px 18px;">' +
-      '<p class="hint" style="margin-bottom:10px;">Log an idea, then move it through Draft, Review, Approved and Posted as it comes together. No posting happens automatically — this just tracks where each one is.</p>' +
-      '<div class="field" style="margin-bottom:8px;"><label for="cp_platform_' + p.id + '">Platform (optional)</label>' +
-      '<input type="text" id="cp_platform_' + p.id + '" placeholder="e.g. Instagram" data-content-platform-input="' + p.id + '"></div>' +
-      '<div class="field" style="margin-bottom:8px;"><label for="cp_copy_' + p.id + '">Idea or draft copy</label>' +
-      '<textarea id="cp_copy_' + p.id + '" rows="2" placeholder="What\'s the post about" data-content-copy-input="' + p.id + '"></textarea></div>' +
-      '<button type="button" class="btn btn-sm" data-add-content-post="' + p.id + '">Add to queue</button>' +
-      "</div>";
-
     if (loading) {
-      html += '<p class="hint" style="margin-top:14px;">Loading…</p>';
-    } else if (!posts.length) {
-      html += '<p class="hint" style="margin-top:14px;">No posts yet — add an idea above to start the queue.</p>';
-    } else {
-      html += '<div class="card" style="padding:8px 4px;margin-top:12px;">' + posts.map(function (post) { return contentPostRowHTML(post, p.id); }).join("") + "</div>";
+      html += '<p class="hint">Loading…</p>';
+      return html;
     }
+
+    html += '<p class="hint">Add an idea, then move it across as it comes together. No posting happens automatically — this just tracks where each one is.</p>';
+    html += '<div class="content-board">' + CONTENT_STAGES.map(function (stage, stageIdx) {
+      var colPosts = posts.filter(function (post) { return post.stage === stage.key; })
+        .sort(function (a, b) { return new Date(b.createdAt) - new Date(a.createdAt); });
+      return '<div class="content-col" data-col="' + stage.key + '">' +
+        '<div class="board-col-head"><h3>' + stage.label + '</h3><span class="board-count">' + colPosts.length + "</span></div>" +
+        colPosts.map(function (post) { return contentCardHTML(post, p.id, stageIdx); }).join("") +
+        (stage.key === "idea"
+          ? '<div class="content-add-row"><textarea class="content-add-input" rows="2" placeholder="Add an idea" data-content-copy-input="' + p.id + '"></textarea>' +
+            '<button type="button" class="btn btn-sm" style="width:100%;" data-add-content-post="' + p.id + '">Add idea</button></div>'
+          : "") +
+        "</div>";
+    }).join("") + "</div>";
+
     return html;
   }
 
@@ -1282,10 +1291,7 @@
     var stageOptions = CONTENT_STAGES.map(function (s) {
       return '<option value="' + s.key + '"' + (s.key === post.stage ? " selected" : "") + '>' + esc(s.label) + "</option>";
     }).join("");
-    var body = '<div class="field-row">' +
-      '<div class="field"><label for="cp_m_platform">Platform</label><input type="text" id="cp_m_platform" value="' + esc(post.platform || "") + '"></div>' +
-      '<div class="field"><label for="cp_m_stage">Stage</label><select id="cp_m_stage">' + stageOptions + "</select></div>" +
-      "</div>" +
+    var body = '<div class="field"><label for="cp_m_stage">Stage</label><select id="cp_m_stage">' + stageOptions + "</select></div>" +
       '<div class="field"><label for="cp_m_copy">Copy</label><textarea id="cp_m_copy" rows="4">' + esc(post.copy || "") + "</textarea></div>" +
       '<div class="field"><label for="cp_m_sched">Scheduled date</label><input type="date" id="cp_m_sched" value="' + esc(post.scheduledDate || "") + '"></div>' +
       '<div class="field"><label for="cp_m_notes">Notes (internal only)</label><textarea id="cp_m_notes" rows="2">' + esc(post.notes || "") + "</textarea></div>" +
@@ -1294,7 +1300,7 @@
     var dlg = openDialog("Edit post", body);
     dlg.querySelector("#saveContentPostBtn").addEventListener("click", function () {
       saveContentPost(projectId, postId, {
-        platform: document.getElementById("cp_m_platform").value.trim(),
+        platform: post.platform || "LinkedIn",
         stage: document.getElementById("cp_m_stage").value,
         copy: document.getElementById("cp_m_copy").value,
         scheduledDate: document.getElementById("cp_m_sched").value,
@@ -1621,7 +1627,7 @@
       price: "",
       paymentTerms: "50% of the total price is due as a deposit before work begins. The remaining 50% is due on completion, before final files are handed over. Invoices are payable within 14 days.",
       revisions: "Two rounds of revisions are included at each stage of the project. Extra rounds, or changes outside the agreed scope, are billed separately at an hourly rate agreed with the Client in advance.",
-      ownership: "Ownership of the final deliverables passes to the Client once the Developer has received payment in full. Until then, all work remains the property of the Developer. This doesn't cover third-party software, plugins or subscriptions used in the project — cookie consent, booking, or CMS integration tools, for example, or things like fonts and stock images. These stay the property of their provider and are governed by that provider's own licence terms. Where the Developer buys a licence under their own account to build a deliverable, that licence transfers to the Client's own account at project handover, or sooner on request. From the date of transfer, the Client is responsible for that licence — its ongoing cost, renewal, and account management",
+      ownership: "Ownership of the final deliverables passes to the Client once the Developer has received payment in full. Until then, all work remains the property of the Developer. Third-party assets used in the project — fonts, stock images, plugins and similar — are licensed for the Client's use, not owned outright, and stay subject to their own licence terms.",
       cancellation: "Either party can end this agreement by giving 14 days' written notice. The Client pays for all work completed up to that point. Any deposit already paid is non-refundable.",
       liability: "The Developer is not liable for indirect or consequential loss arising from this project. The Developer's total liability under this agreement is capped at the total fees paid by the Client.",
       confidentiality: "Both parties agree to keep anything shared in confidence during this project private, and not to pass it on to anyone else without permission.",
@@ -2607,16 +2613,14 @@
 
     if ((el = e.target.closest("[data-add-content-post]"))) {
       var addCpProjId = el.getAttribute("data-add-content-post");
-      var platEl = document.querySelector('[data-content-platform-input="' + addCpProjId + '"]');
       var copyEl = document.querySelector('[data-content-copy-input="' + addCpProjId + '"]');
-      var newPlatform = platEl ? platEl.value.trim() : "";
       var newCopy = copyEl ? copyEl.value.trim() : "";
       if (!newCopy) { if (copyEl) copyEl.focus(); return; }
       el.disabled = true;
       fetch("/api/content-posts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectId: addCpProjId, platform: newPlatform, copy: newCopy, stage: "idea" })
+        body: JSON.stringify({ projectId: addCpProjId, platform: "LinkedIn", copy: newCopy, stage: "idea" })
       })
         .then(function (res) {
           if (res.status === 401) { window.location.href = "/login"; throw new Error("unauthorized"); }
