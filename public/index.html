@@ -431,9 +431,9 @@
 
   @media (max-width: 780px) {
     #app { flex-direction: column; }
-    .rail { position: static; width: 100%; height: auto; flex-direction: row; align-items: center; overflow-x: auto; }
-    .nav-group { flex-direction: row; }
-    .rail-foot { display: none; }
+    .rail { position: static; width: 100%; height: auto; flex-direction: row; align-items: center; overflow-x: auto; gap: 14px; }
+    .nav-group { flex-direction: row; flex: none; }
+    .rail-foot { margin-top: 0; padding: 8px 4px; flex-direction: row; align-items: center; flex: none; white-space: nowrap; }
     .main { padding: 22px 18px 60px; }
     .board { grid-template-columns: 1fr; }
     .stat-row { grid-template-columns: repeat(2, 1fr); }
@@ -2049,7 +2049,13 @@
           mutate(function () { state.contracts = state.contracts.filter(function (x) { return x.id !== conId; }); });
           navigate("#/contracts");
           showToast("Contract deleted");
-          fetch("/api/contract-shares/" + conId, { method: "DELETE" }).catch(function () {});
+          fetch("/api/contract-shares/" + conId, { method: "DELETE" })
+            .then(function (res) {
+              if (!res.ok) throw new Error("cleanup-failed");
+            })
+            .catch(function () {
+              showToast("Contract deleted, but couldn't confirm its share link was revoked — check it manually");
+            });
         }
       });
       return;
