@@ -248,6 +248,26 @@ function ensureSchema() {
           "created_at TIMESTAMPTZ NOT NULL DEFAULT now()" +
         ")"
       );
+    })
+    .then(function () {
+      // Signatures live in their own table for the same reason content_posts
+      // does: contract_shares.data is a full-document snapshot that gets
+      // overwritten wholesale every time the contract is edited in-app
+      // (scheduleShareSync), so a client's signature landing inside that
+      // JSONB blob would risk getting silently wiped out by Darren's next
+      // keystroke. A dedicated row per (contract, role) survives that. One
+      // contract can have at most one developer signature and one client
+      // signature — signing again just replaces the row.
+      return pool.query(
+        "CREATE TABLE IF NOT EXISTS contract_signatures (" +
+          "contract_id TEXT NOT NULL, " +
+          "role TEXT NOT NULL, " +
+          "name TEXT NOT NULL DEFAULT '', " +
+          "image_data TEXT NOT NULL, " +
+          "signed_at TIMESTAMPTZ NOT NULL DEFAULT now(), " +
+          "PRIMARY KEY (contract_id, role)" +
+        ")"
+      );
     });
 }
 
@@ -291,6 +311,34 @@ function contractPdfFilename(data) {
 var HEX_COLOR_RE = /^#[0-9a-f]{6}$/i;
 function validAccentColor(value) {
   return typeof value === "string" && HEX_COLOR_RE.test(value) ? value : null;
+}
+
+var MAX_SIGNATURE_DATA_URL_LENGTH = 2000000; // ~1.5MB image, generous for a drawn or uploaded signature
+var SIGNATURE_DATA_URL_RE = /^data:image\/(png|jpeg|jpg);base64,/i;
+function validSignatureImage(value) {
+  return typeof value === "string" && value.length <= MAX_SIGNATURE_DATA_URL_LENGTH && SIGNATURE_DATA_URL_RE.test(value);
+}
+
+function getContractSignatures(contractId) {
+  return pool.query(
+    "SELECT role, name, image_data, signed_at FROM contract_signatures WHERE contract_id = $1",
+    [contractId]
+  ).then(function (result) {
+    var out = { developer: null, client: null };
+    result.rows.forEach(function (r) {
+      out[r.role] = { name: r.name, imageData: r.image_data, signedAt: r.signed_at };
+    });
+    return out;
+  });
+}
+
+function upsertContractSignature(contractId, role, name, imageData) {
+  return pool.query(
+    "INSERT INTO contract_signatures (contract_id, role, name, image_data, signed_at) VALUES ($1, $2, $3, $4, now()) " +
+      "ON CONFLICT (contract_id, role) DO UPDATE SET name = EXCLUDED.name, image_data = EXCLUDED.image_data, signed_at = now() " +
+      "RETURNING signed_at",
+    [contractId, role, name || "", imageData]
+  );
 }
 
 function renderContractPdf(res, data) {
@@ -368,11 +416,29 @@ function renderContractPdf(res, data) {
 
   h2("Agreed");
   doc.moveDown(0.3);
-  body("Client: ______________________     Date: __________");
-  body(data.clientName || "");
+  var signatures = data.signatures || {};
+  renderSignatureBlock("Client", data.clientName, signatures.client);
   doc.moveDown(0.6);
-  body("Developer: ______________________     Date: __________");
-  body(data.yourName || "");
+  renderSignatureBlock("Developer", data.yourName, signatures.developer);
+
+  function renderSignatureBlock(roleLabel, personName, sig) {
+    doc.font("Helvetica-Bold").fontSize(9.5).fillColor("#555555").text(roleLabel.toUpperCase(), { characterSpacing: 0.3 });
+    doc.moveDown(0.2);
+    if (sig && sig.imageData) {
+      var m = /^data:image\/(png|jpeg|jpg);base64,(.+)$/i.exec(sig.imageData);
+      if (m) {
+        try {
+          doc.image(Buffer.from(m[2], "base64"), { fit: [170, 56] });
+          doc.moveDown(0.15);
+        } catch (imgErr) {
+          console.error("renderContractPdf: could not draw signature image:", imgErr);
+        }
+      }
+      body((sig.name || personName || "") + " — signed " + fmtDatePdf(String(sig.signedAt).slice(0, 10)));
+    } else {
+      doc.font("Helvetica").fontSize(10).fillColor("#8a8a8a").text((personName || "") + " — not yet signed");
+    }
+  }
 
   doc.end();
 }
@@ -486,11 +552,13 @@ app.get("/share/contract/:token", function (req, res) {
 });
 
 app.get("/api/public/contract-shares/:token", function (req, res) {
-  pool.query("SELECT data, updated_at FROM contract_shares WHERE token = $1", [req.params.token])
+  pool.query("SELECT contract_id, data, updated_at FROM contract_shares WHERE token = $1", [req.params.token])
     .then(function (result) {
       var row = result.rows[0];
       if (!row) return res.status(404).json({ error: "not-found" });
-      res.json({ data: row.data, updatedAt: row.updated_at });
+      return getContractSignatures(row.contract_id).then(function (signatures) {
+        res.json({ data: row.data, updatedAt: row.updated_at, signatures: signatures });
+      });
     })
     .catch(function (err) {
       console.error("GET /api/public/contract-shares/:token failed:", err);
@@ -499,15 +567,44 @@ app.get("/api/public/contract-shares/:token", function (req, res) {
 });
 
 app.get("/api/public/contract-shares/:token/pdf", function (req, res) {
-  pool.query("SELECT data FROM contract_shares WHERE token = $1", [req.params.token])
+  pool.query("SELECT contract_id, data FROM contract_shares WHERE token = $1", [req.params.token])
     .then(function (result) {
       var row = result.rows[0];
       if (!row) return res.status(404).send("This link isn't valid, or has been removed.");
-      renderContractPdf(res, row.data);
+      return getContractSignatures(row.contract_id).then(function (signatures) {
+        var data = row.data || {};
+        data.signatures = signatures;
+        renderContractPdf(res, data);
+      });
     })
     .catch(function (err) {
       console.error("GET /api/public/contract-shares/:token/pdf failed:", err);
       if (!res.headersSent) res.status(500).send("Could not load this contract");
+    });
+});
+
+/* Client signing their copy — the only public write onto contract data.
+   Scoped by the token's own contract_id, same as the content-approval
+   writes above, and capped in size so nobody can stash something large in
+   a "signature". Always writes role "client": this endpoint has no way to
+   claim to be the developer. */
+app.post("/api/public/contract-shares/:token/signature", function (req, res) {
+  var name = String((req.body && req.body.name) || "").slice(0, 200);
+  var imageData = req.body && req.body.imageData;
+  if (!validSignatureImage(imageData)) {
+    return res.status(400).json({ error: "That doesn't look like a valid signature image" });
+  }
+  pool.query("SELECT contract_id FROM contract_shares WHERE token = $1", [req.params.token])
+    .then(function (result) {
+      var row = result.rows[0];
+      if (!row) return res.status(404).json({ error: "not-found" });
+      return upsertContractSignature(row.contract_id, "client", name, imageData).then(function (result2) {
+        res.json({ ok: true, signedAt: result2.rows[0].signed_at });
+      });
+    })
+    .catch(function (err) {
+      console.error("POST /api/public/contract-shares/:token/signature failed:", err);
+      if (!res.headersSent) res.status(500).json({ error: "Could not save your signature" });
     });
 });
 
@@ -751,12 +848,66 @@ app.delete("/api/attachments/:id", function (req, res) {
 app.post("/api/contracts/pdf", function (req, res) {
   var data = req.body;
   if (!data || typeof data !== "object") return res.status(400).json({ error: "Missing contract data" });
-  try {
-    renderContractPdf(res, data);
-  } catch (err) {
-    console.error("POST /api/contracts/pdf failed:", err);
-    if (!res.headersSent) res.status(500).json({ error: "Could not generate the PDF" });
+  var sigPromise = data.contractId ? getContractSignatures(data.contractId) : Promise.resolve({ developer: null, client: null });
+  sigPromise
+    .then(function (signatures) {
+      data.signatures = signatures;
+      try {
+        renderContractPdf(res, data);
+      } catch (err) {
+        console.error("POST /api/contracts/pdf render failed:", err);
+        if (!res.headersSent) res.status(500).json({ error: "Could not generate the PDF" });
+      }
+    })
+    .catch(function (err) {
+      console.error("POST /api/contracts/pdf failed:", err);
+      if (!res.headersSent) res.status(500).json({ error: "Could not generate the PDF" });
+    });
+});
+
+app.get("/api/contracts/:id/signatures", function (req, res) {
+  getContractSignatures(req.params.id)
+    .then(function (signatures) { res.json(signatures); })
+    .catch(function (err) {
+      console.error("GET /api/contracts/:id/signatures failed:", err);
+      res.status(500).json({ error: "Could not load signatures" });
+    });
+});
+
+app.post("/api/contracts/:id/signatures", function (req, res) {
+  var role = req.body && req.body.role;
+  var name = String((req.body && req.body.name) || "").slice(0, 200);
+  var imageData = req.body && req.body.imageData;
+  if (role !== "developer" && role !== "client") return res.status(400).json({ error: "Invalid role" });
+  if (!validSignatureImage(imageData)) {
+    return res.status(400).json({ error: "That doesn't look like a valid signature image" });
   }
+  upsertContractSignature(req.params.id, role, name, imageData)
+    .then(function (result) { res.json({ ok: true, signedAt: result.rows[0].signed_at }); })
+    .catch(function (err) {
+      console.error("POST /api/contracts/:id/signatures failed:", err);
+      res.status(500).json({ error: "Could not save the signature" });
+    });
+});
+
+app.delete("/api/contracts/:id/signatures/:role", function (req, res) {
+  var role = req.params.role;
+  if (role !== "developer" && role !== "client") return res.status(400).json({ error: "Invalid role" });
+  pool.query("DELETE FROM contract_signatures WHERE contract_id = $1 AND role = $2", [req.params.id, role])
+    .then(function () { res.json({ ok: true }); })
+    .catch(function (err) {
+      console.error("DELETE /api/contracts/:id/signatures/:role failed:", err);
+      res.status(500).json({ error: "Could not clear that signature" });
+    });
+});
+
+app.delete("/api/contracts/:id/signatures", function (req, res) {
+  pool.query("DELETE FROM contract_signatures WHERE contract_id = $1", [req.params.id])
+    .then(function () { res.json({ ok: true }); })
+    .catch(function (err) {
+      console.error("DELETE /api/contracts/:id/signatures failed:", err);
+      res.status(500).json({ error: "Could not clear signatures" });
+    });
 });
 
 app.post("/api/contract-shares", function (req, res) {

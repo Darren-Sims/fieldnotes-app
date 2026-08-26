@@ -18,6 +18,7 @@
     --surface-sunken: #ebebeb;
     --surface-raised-shadow: 0 1px 2px rgba(10,10,10,0.06), 0 1px 1px rgba(10,10,10,0.04);
     --border: #d4d4d4;
+    --border-interactive: #737373;
     --text-primary: #111111;
     --text-secondary: #404040;
     --text-on-accent: #ffffff;
@@ -25,6 +26,7 @@
     --accent: #1e2a5e;
     --accent-strong: #141b45;
     --accent-ring: #aebdec;
+    --accent-tint: #e8edfa;
 
     --danger-text: #b91c1c;
     --danger-bg: #fdeaea;
@@ -46,12 +48,14 @@
       --surface-sunken: #101010;
       --surface-raised-shadow: 0 1px 0 rgba(255,255,255,0.03), 0 4px 14px rgba(0,0,0,0.35);
       --border: #262626;
+      --border-interactive: #666666;
       --text-primary: #f5f5f5;
       --text-secondary: #a3a3a3;
       --text-on-accent: #ffffff;
       --accent: #6f8fe0;
       --accent-strong: #a9bcee;
       --accent-ring: #3a4a86;
+      --accent-tint: #14203f;
       --danger-text: #f3a6a6;
       --danger-bg: #2a0f0f;
     }
@@ -127,6 +131,38 @@
   .state-card { text-align: center; padding: 48px 30px; }
   .state-card h1 { font-size: 18px; margin-bottom: 8px; }
   .state-card p { color: var(--text-secondary); font-size: 13.5px; }
+
+  .sig-row { display: flex; gap: 16px; flex-wrap: wrap; margin: 10px 0 4px; }
+  .sig-col { flex: 1; min-width: 160px; }
+  .sig-role { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-secondary); margin-bottom: 6px; }
+  .sig-block { border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-sunken); padding: 10px; min-height: 56px; display: flex; flex-direction: column; justify-content: center; }
+  .sig-block.sig-empty { color: var(--text-secondary); font-size: 13px; }
+  .sig-image { max-width: 100%; max-height: 60px; background: #ffffff; border-radius: 4px; padding: 4px; display: block; }
+  .sig-meta { font-size: 11.5px; color: var(--text-secondary); margin-top: 4px; }
+
+  .sign-card { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); }
+  .sign-card h3:first-child { margin-top: 0; }
+  .field { margin-bottom: 12px; }
+  .field label { display: block; font-size: 12.5px; font-weight: 600; margin-bottom: 5px; color: var(--text-secondary); }
+  .field input[type="text"] {
+    width: 100%; padding: 9px 10px; border-radius: var(--radius-sm);
+    border: 1px solid var(--border-interactive); background: var(--surface); color: var(--text-primary); font-size: 14px;
+  }
+  .sig-tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+  .tab-btn {
+    padding: 6px 13px; border-radius: var(--radius-pill); font-size: 12.5px; font-weight: 600;
+    border: 1px solid var(--border); background: var(--surface); color: var(--text-secondary); cursor: pointer;
+  }
+  .tab-btn[aria-pressed="true"] { background: var(--accent-tint); border-color: var(--accent); color: var(--accent-strong); }
+  .sig-canvas-wrap { border: 1px dashed var(--border-interactive); border-radius: var(--radius-md); background: #ffffff; margin-bottom: 8px; }
+  .sig-canvas { display: block; width: 100%; height: 130px; touch-action: none; cursor: crosshair; border-radius: var(--radius-md); }
+  .sig-upload-preview { max-width: 100%; max-height: 90px; margin-top: 8px; background: #ffffff; border-radius: 4px; padding: 4px; border: 1px solid var(--border); display: block; }
+  .btn-outline-sm {
+    padding: 6px 12px; border-radius: var(--radius-pill); font-size: 12.5px; font-weight: 600; cursor: pointer;
+    border: 1.5px solid var(--accent); background: transparent; color: var(--accent);
+  }
+  .link-btn { background: none; border: none; color: var(--accent); text-decoration: underline; cursor: pointer; font-size: 12.5px; padding: 0; }
+  .sign-error { display: none; color: var(--danger-text); font-size: 12.5px; margin-top: 8px; }
 </style>
 </head>
 <body>
@@ -170,12 +206,24 @@
       var token = parts[parts.length - 1] || "";
       var content = document.getElementById("content");
       var footNote = document.getElementById("footNote");
+      var currentData = {};
+      var currentSignatures = { developer: null, client: null };
 
       function showState(title, body) {
         content.innerHTML = '<div class="card state-card"><h1>' + esc(title) + "</h1><p>" + esc(body) + "</p></div>";
       }
 
-      function render(data) {
+      function signatureStatusHTML(sig, personName) {
+        if (sig && sig.imageData) {
+          return '<div class="sig-block"><img class="sig-image" src="' + esc(sig.imageData) + '" alt="Signature">' +
+            '<div class="sig-meta">' + esc(sig.name || personName || "") + " &middot; signed " + fmtDate(String(sig.signedAt).slice(0, 10)) + "</div></div>";
+        }
+        return '<div class="sig-block sig-empty">Not yet signed</div>';
+      }
+
+      function render(data, signatures) {
+        currentData = data;
+        currentSignatures = signatures || { developer: null, client: null };
         var deliverables = (data.deliverables || []).filter(function (d) { return d && String(d).trim(); });
         var clientLabel = esc(data.clientName || "—") + (data.clientCompany ? " (" + esc(data.clientCompany) + ")" : "");
         var pdfUrl = "/api/public/contract-shares/" + encodeURIComponent(token) + "/pdf";
@@ -204,12 +252,159 @@
         if (data.liability) html += "<h3>Liability</h3><p>" + esc(data.liability) + "</p>";
         if (data.confidentiality) html += "<h3>Confidentiality</h3><p>" + esc(data.confidentiality) + "</p>";
         html += "<h3>Governing law</h3><p>This agreement is governed by the law of " + esc(data.governingLaw || "England and Wales") + ".</p>";
-        html += "<h3>Agreed</h3><p>Client: ______________________&nbsp;&nbsp;&nbsp;Date: __________<br>" + esc(data.clientName || "") + "</p>" +
-          "<p>Developer: ______________________&nbsp;&nbsp;&nbsp;Date: __________<br>" + esc(data.yourName || "") + "</p>";
+
+        html += "<h3>Agreed</h3><div class=\"sig-row\">" +
+          '<div class="sig-col"><div class="sig-role">Client</div>' + signatureStatusHTML(currentSignatures.client, data.clientName) + "</div>" +
+          '<div class="sig-col"><div class="sig-role">Developer</div>' + signatureStatusHTML(currentSignatures.developer, data.yourName) + "</div>" +
+          "</div>";
+        html += '<div id="signBlock"></div>';
         html += "</div></div>";
 
         content.innerHTML = html;
         footNote.style.display = "block";
+        renderSignBlock();
+      }
+
+      /* ---- Signing ---- */
+
+      function renderSignBlock() {
+        var wrap = document.getElementById("signBlock");
+        if (!wrap) return;
+        if (currentSignatures.client) {
+          wrap.innerHTML = '<p style="margin-top:10px;"><button type="button" class="link-btn" id="resignBtn">Made a mistake? Sign again</button></p>';
+          document.getElementById("resignBtn").addEventListener("click", showSignForm);
+        } else {
+          showSignForm();
+        }
+      }
+
+      function showSignForm() {
+        var wrap = document.getElementById("signBlock");
+        if (!wrap) return;
+        wrap.innerHTML =
+          '<div class="sign-card">' +
+          "<h3>Sign this contract</h3>" +
+          '<div class="field"><label for="signName">Full name</label><input type="text" id="signName" placeholder="Your full name" value="' + esc((currentSignatures.client && currentSignatures.client.name) || currentData.clientName || "") + '"></div>' +
+          '<div class="sig-tabs">' +
+          '<button type="button" class="tab-btn" data-sign-tab="draw" aria-pressed="true">Draw</button>' +
+          '<button type="button" class="tab-btn" data-sign-tab="upload" aria-pressed="false">Upload</button>' +
+          "</div>" +
+          '<div id="signDrawPane"><div class="sig-canvas-wrap"><canvas id="signCanvas" class="sig-canvas"></canvas></div>' +
+          '<button type="button" class="btn-outline-sm" id="signClearBtn">Clear</button></div>' +
+          '<div id="signUploadPane" style="display:none;"><input type="file" id="signFileInput" accept="image/*">' +
+          '<div id="signUploadPreviewWrap"></div></div>' +
+          '<button type="button" class="btn-pdf" id="signSaveBtn" style="margin-top:12px;">Sign contract</button>' +
+          '<p class="sign-error" id="signError"></p>' +
+          "</div>";
+        wireSignForm();
+      }
+
+      function wireSignForm() {
+        var wrap = document.getElementById("signBlock");
+        var canvas = wrap.querySelector("#signCanvas");
+        var ctx = canvas.getContext("2d");
+        var dpr = window.devicePixelRatio || 1;
+        var rect = canvas.getBoundingClientRect();
+        canvas.width = rect.width * dpr;
+        canvas.height = rect.height * dpr;
+        ctx.scale(dpr, dpr);
+        ctx.lineWidth = 2.2;
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        ctx.strokeStyle = "#111111";
+
+        var drawing = false, hasDrawn = false, lastX = 0, lastY = 0;
+        function pointFromEvent(e) {
+          var r = canvas.getBoundingClientRect();
+          var p = e.touches && e.touches.length ? e.touches[0] : e;
+          return { x: p.clientX - r.left, y: p.clientY - r.top };
+        }
+        function startDraw(e) {
+          drawing = true; hasDrawn = true;
+          var p = pointFromEvent(e); lastX = p.x; lastY = p.y;
+          e.preventDefault();
+        }
+        function moveDraw(e) {
+          if (!drawing) return;
+          var p = pointFromEvent(e);
+          ctx.beginPath(); ctx.moveTo(lastX, lastY); ctx.lineTo(p.x, p.y); ctx.stroke();
+          lastX = p.x; lastY = p.y;
+          e.preventDefault();
+        }
+        function endDraw() { drawing = false; }
+        canvas.addEventListener("mousedown", startDraw);
+        canvas.addEventListener("mousemove", moveDraw);
+        canvas.addEventListener("mouseup", endDraw);
+        canvas.addEventListener("mouseleave", endDraw);
+        canvas.addEventListener("touchstart", startDraw, { passive: false });
+        canvas.addEventListener("touchmove", moveDraw, { passive: false });
+        canvas.addEventListener("touchend", endDraw);
+
+        wrap.querySelector("#signClearBtn").addEventListener("click", function () {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          hasDrawn = false;
+        });
+
+        var activeTab = "draw";
+        var uploadedDataUrl = null;
+        Array.prototype.forEach.call(wrap.querySelectorAll("[data-sign-tab]"), function (tabBtn) {
+          tabBtn.addEventListener("click", function () {
+            activeTab = tabBtn.getAttribute("data-sign-tab");
+            Array.prototype.forEach.call(wrap.querySelectorAll("[data-sign-tab]"), function (b) { b.setAttribute("aria-pressed", String(b === tabBtn)); });
+            wrap.querySelector("#signDrawPane").style.display = activeTab === "draw" ? "" : "none";
+            wrap.querySelector("#signUploadPane").style.display = activeTab === "upload" ? "" : "none";
+          });
+        });
+
+        wrap.querySelector("#signFileInput").addEventListener("change", function (e) {
+          var file = e.target.files && e.target.files[0];
+          if (!file) return;
+          var reader = new FileReader();
+          reader.onload = function () {
+            uploadedDataUrl = reader.result;
+            wrap.querySelector("#signUploadPreviewWrap").innerHTML = '<img class="sig-upload-preview" src="' + uploadedDataUrl + '" alt="Uploaded signature preview">';
+          };
+          reader.readAsDataURL(file);
+        });
+
+        function showSignError(msg) {
+          var errEl = wrap.querySelector("#signError");
+          errEl.textContent = msg;
+          errEl.style.display = "block";
+        }
+
+        wrap.querySelector("#signSaveBtn").addEventListener("click", function () {
+          var name = wrap.querySelector("#signName").value.trim();
+          var imageData = activeTab === "draw" ? (hasDrawn ? canvas.toDataURL("image/png") : null) : uploadedDataUrl;
+          if (!name) { showSignError("Enter your full name."); return; }
+          if (!imageData) {
+            showSignError(activeTab === "draw" ? "Draw your signature first, or switch to Upload." : "Choose an image to upload.");
+            return;
+          }
+          var saveBtn = wrap.querySelector("#signSaveBtn");
+          saveBtn.disabled = true;
+          saveBtn.textContent = "Saving…";
+          fetch("/api/public/contract-shares/" + encodeURIComponent(token) + "/signature", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name: name, imageData: imageData })
+          })
+            .then(function (res) {
+              return res.json().catch(function () { return {}; }).then(function (d) {
+                if (!res.ok) throw new Error(d.error || "Could not save your signature");
+                return d;
+              });
+            })
+            .then(function (result) {
+              currentSignatures.client = { name: name, imageData: imageData, signedAt: result.signedAt };
+              render(currentData, currentSignatures);
+            })
+            .catch(function (err) {
+              saveBtn.disabled = false;
+              saveBtn.textContent = "Sign contract";
+              showSignError(err.message || "Could not save your signature. Try again.");
+            });
+        });
       }
 
       if (!token) {
@@ -223,7 +418,7 @@
           if (!res.ok) throw new Error("load-failed");
           return res.json();
         })
-        .then(function (result) { render(result.data || {}); })
+        .then(function (result) { render(result.data || {}, result.signatures); })
         .catch(function (err) {
           if (err && err.message === "handled") return;
           showState("Couldn't load this contract", "Check your connection and try refreshing the page.");

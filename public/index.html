@@ -392,6 +392,18 @@
   .content-add-input::placeholder { color: var(--text-secondary); }
   @media (max-width: 780px) { .content-col { min-width: 190px; } }
 
+  .sig-row { display: flex; gap: 16px; flex-wrap: wrap; margin: 10px 0 4px; }
+  .sig-col { flex: 1; min-width: 180px; }
+  .sig-role { font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-secondary); margin-bottom: 6px; }
+  .sig-block { border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-sunken); padding: 10px; min-height: 60px; display: flex; flex-direction: column; justify-content: center; }
+  .sig-block.sig-empty { color: var(--text-secondary); font-size: 13px; }
+  .sig-image { max-width: 100%; max-height: 64px; background: #ffffff; border-radius: 4px; padding: 4px; display: block; }
+  .sig-meta { font-size: 11.5px; color: var(--text-secondary); margin-top: 4px; }
+  .sig-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+  .sig-canvas-wrap { border: 1px dashed var(--border-interactive); border-radius: var(--radius-md); background: #ffffff; }
+  .sig-canvas { display: block; width: 100%; height: 140px; touch-action: none; cursor: crosshair; border-radius: var(--radius-md); }
+  .sig-upload-preview { max-width: 100%; max-height: 100px; margin-top: 8px; background: #ffffff; border-radius: 4px; padding: 4px; border: 1px solid var(--border); display: block; }
+
   .note-type-tabs { display: flex; gap: 6px; margin-bottom: 12px; }
   .note-log { margin-top: 8px; }
   .note-item { padding: 12px 0; border-bottom: 1px solid var(--border); display: flex; gap: 10px; }
@@ -1677,6 +1689,7 @@
   function viewContractEditor(id) {
     var c = state.contracts.find(function (x) { return x.id === id; });
     if (!c) return pageHead("Contract not found", "") + emptyState("This contract is gone", "", '<button class="btn" data-nav="#/contracts">Back to contracts</button>');
+    loadContractSignatures(c.id);
 
     var html = '<button class="back-link" data-nav="#/contracts">&larr; All contracts</button>';
     html += '<div class="page-head"><div><div class="page-eyebrow">Contract</div><h1>' + esc(c.projectName || "Untitled contract") + "</h1></div>" +
@@ -1769,9 +1782,174 @@
     if (c.liability) html += "<h3>Liability</h3><p>" + esc(c.liability) + "</p>";
     if (c.confidentiality) html += "<h3>Confidentiality</h3><p>" + esc(c.confidentiality) + "</p>";
     html += "<h3>Governing law</h3><p>This agreement is governed by the law of " + esc(c.governingLaw || "England and Wales") + ".</p>";
-    html += "<h3>Agreed</h3><p>Client: ______________________&nbsp;&nbsp;&nbsp;Date: __________<br>" + esc(c.clientName || "") + "</p>" +
-      "<p>Developer: ______________________&nbsp;&nbsp;&nbsp;Date: __________<br>" + esc(c.yourName || "") + "</p>";
+    html += "<h3>Agreed</h3>" + contractAgreedHTML(c);
     return html;
+  }
+
+  /* ---- Signatures ----
+   * Like content posts, signatures live in their own table rather than the
+   * autosaved app_state blob: a client signing via the public share link
+   * needs to write back safely without racing an in-app edit landing at
+   * the same time. Fetched per-contract on demand and cached here. */
+
+  var contractSignaturesCache = {}; // contractId -> {developer, client} once loaded, undefined before first request
+
+  function loadContractSignatures(contractId) {
+    if (contractSignaturesCache[contractId] !== undefined) return;
+    contractSignaturesCache[contractId] = null;
+    fetch("/api/contracts/" + encodeURIComponent(contractId) + "/signatures", { cache: "no-store" })
+      .then(function (res) {
+        if (!res.ok) throw new Error("load-failed");
+        return res.json();
+      })
+      .then(function (sigs) {
+        contractSignaturesCache[contractId] = sigs;
+        render();
+      })
+      .catch(function () {
+        contractSignaturesCache[contractId] = { developer: null, client: null };
+      });
+  }
+
+  function signatureStatusHTML(sig, personName) {
+    if (sig && sig.imageData) {
+      return '<div class="sig-block"><img class="sig-image" src="' + esc(sig.imageData) + '" alt="Signature">' +
+        '<div class="sig-meta">' + esc(sig.name || personName || "") + " &middot; signed " + fmtDateShort(String(sig.signedAt).slice(0, 10)) + "</div></div>";
+    }
+    return '<div class="sig-block sig-empty">Not yet signed</div>';
+  }
+
+  function contractAgreedHTML(c) {
+    var sigs = contractSignaturesCache[c.id];
+    if (sigs == null) return '<p class="hint">Loading signatures…</p>';
+    var html = '<div class="sig-row">';
+    html += '<div class="sig-col"><div class="sig-role">Client</div>' + signatureStatusHTML(sigs.client, c.clientName) +
+      '<div class="sig-actions"><button type="button" class="btn btn-sm" data-open-signature="client" data-signature-contract="' + c.id + '">' +
+      (sigs.client ? "Replace" : "Add manually") + "</button>" +
+      (sigs.client ? '<button type="button" class="btn btn-sm btn-danger-quiet" data-clear-signature="client" data-signature-contract="' + c.id + '">Clear</button>' : "") +
+      "</div></div>";
+    html += '<div class="sig-col"><div class="sig-role">Developer</div>' + signatureStatusHTML(sigs.developer, c.yourName) +
+      '<div class="sig-actions"><button type="button" class="btn btn-sm" data-open-signature="developer" data-signature-contract="' + c.id + '">' +
+      (sigs.developer ? "Replace" : "Sign") + "</button>" +
+      (sigs.developer ? '<button type="button" class="btn btn-sm btn-danger-quiet" data-clear-signature="developer" data-signature-contract="' + c.id + '">Clear</button>' : "") +
+      "</div></div>";
+    html += "</div>";
+    return html;
+  }
+
+  function openSignatureModal(contractId, role, defaultName) {
+    var body = '<div class="field"><label for="sig_name">Full name</label><input type="text" id="sig_name" value="' + esc(defaultName || "") + '"></div>' +
+      '<div class="note-type-tabs">' +
+      '<button type="button" class="angle-tab" data-sig-tab="draw" aria-pressed="true">Draw</button>' +
+      '<button type="button" class="angle-tab" data-sig-tab="upload" aria-pressed="false">Upload</button>' +
+      "</div>" +
+      '<div id="sigDrawPane"><div class="sig-canvas-wrap"><canvas id="sigCanvas" class="sig-canvas"></canvas></div>' +
+      '<button type="button" class="btn btn-sm" id="sigClearBtn" style="margin-top:8px;">Clear</button></div>' +
+      '<div id="sigUploadPane" style="display:none;"><input type="file" id="sigFileInput" accept="image/*">' +
+      '<div id="sigUploadPreviewWrap"></div></div>' +
+      '<div class="dialog-actions"><span style="flex:1"></span><button type="button" class="btn" data-close-dialog="1">Cancel</button>' +
+      '<button type="button" class="btn btn-primary" id="sigSaveBtn">Save signature</button></div>';
+    var dlg = openDialog(role === "developer" ? "Sign as developer" : "Add client signature", body);
+
+    var canvas = dlg.querySelector("#sigCanvas");
+    var ctx = canvas.getContext("2d");
+    var dpr = window.devicePixelRatio || 1;
+    var rect = canvas.getBoundingClientRect();
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    ctx.scale(dpr, dpr);
+    ctx.lineWidth = 2.2;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.strokeStyle = "#111111";
+
+    var drawing = false, hasDrawn = false, lastX = 0, lastY = 0;
+    function pointFromEvent(e) {
+      var r = canvas.getBoundingClientRect();
+      var p = e.touches && e.touches.length ? e.touches[0] : e;
+      return { x: p.clientX - r.left, y: p.clientY - r.top };
+    }
+    function startDraw(e) {
+      drawing = true; hasDrawn = true;
+      var p = pointFromEvent(e); lastX = p.x; lastY = p.y;
+      e.preventDefault();
+    }
+    function moveDraw(e) {
+      if (!drawing) return;
+      var p = pointFromEvent(e);
+      ctx.beginPath(); ctx.moveTo(lastX, lastY); ctx.lineTo(p.x, p.y); ctx.stroke();
+      lastX = p.x; lastY = p.y;
+      e.preventDefault();
+    }
+    function endDraw() { drawing = false; }
+    canvas.addEventListener("mousedown", startDraw);
+    canvas.addEventListener("mousemove", moveDraw);
+    canvas.addEventListener("mouseup", endDraw);
+    canvas.addEventListener("mouseleave", endDraw);
+    canvas.addEventListener("touchstart", startDraw, { passive: false });
+    canvas.addEventListener("touchmove", moveDraw, { passive: false });
+    canvas.addEventListener("touchend", endDraw);
+
+    dlg.querySelector("#sigClearBtn").addEventListener("click", function () {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      hasDrawn = false;
+    });
+
+    var activeTab = "draw";
+    var uploadedDataUrl = null;
+    Array.prototype.forEach.call(dlg.querySelectorAll("[data-sig-tab]"), function (tabBtn) {
+      tabBtn.addEventListener("click", function () {
+        activeTab = tabBtn.getAttribute("data-sig-tab");
+        Array.prototype.forEach.call(dlg.querySelectorAll("[data-sig-tab]"), function (b) { b.setAttribute("aria-pressed", String(b === tabBtn)); });
+        dlg.querySelector("#sigDrawPane").style.display = activeTab === "draw" ? "" : "none";
+        dlg.querySelector("#sigUploadPane").style.display = activeTab === "upload" ? "" : "none";
+      });
+    });
+
+    dlg.querySelector("#sigFileInput").addEventListener("change", function (e) {
+      var file = e.target.files && e.target.files[0];
+      if (!file) return;
+      var reader = new FileReader();
+      reader.onload = function () {
+        uploadedDataUrl = reader.result;
+        dlg.querySelector("#sigUploadPreviewWrap").innerHTML = '<img class="sig-upload-preview" src="' + uploadedDataUrl + '" alt="Uploaded signature preview">';
+      };
+      reader.readAsDataURL(file);
+    });
+
+    dlg.querySelector("#sigSaveBtn").addEventListener("click", function () {
+      var name = dlg.querySelector("#sig_name").value.trim();
+      var imageData = activeTab === "draw" ? (hasDrawn ? canvas.toDataURL("image/png") : null) : uploadedDataUrl;
+      if (!imageData) {
+        showToast(activeTab === "draw" ? "Draw a signature first, or switch to Upload" : "Choose an image to upload");
+        return;
+      }
+      var saveBtn = dlg.querySelector("#sigSaveBtn");
+      saveBtn.disabled = true;
+      fetch("/api/contracts/" + encodeURIComponent(contractId) + "/signatures", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role: role, name: name, imageData: imageData })
+      })
+        .then(function (res) {
+          if (res.status === 401) { window.location.href = "/login"; throw new Error("unauthorized"); }
+          if (!res.ok) return res.json().catch(function () { return {}; }).then(function (d) { throw new Error(d.error || "save-failed"); });
+          return res.json();
+        })
+        .then(function (result) {
+          var sigs = contractSignaturesCache[contractId] || { developer: null, client: null };
+          sigs[role] = { name: name, imageData: imageData, signedAt: result.signedAt };
+          contractSignaturesCache[contractId] = sigs;
+          dlg.close();
+          showToast("Signature saved");
+          render();
+        })
+        .catch(function (err) {
+          saveBtn.disabled = false;
+          if (err && err.message === "unauthorized") return;
+          showToast("Couldn't save that signature — try again");
+        });
+    });
   }
 
   function contractMarkdown(c) {
@@ -1803,12 +1981,17 @@
     if (c.confidentiality) { lines.push("## Confidentiality", c.confidentiality, ""); }
     lines.push("## Governing law", "This agreement is governed by the law of " + (c.governingLaw || "England and Wales") + ".", "");
     lines.push("## Agreed");
-    lines.push("Client: ______________________  Date: __________");
-    lines.push(c.clientName || "");
-    lines.push("");
-    lines.push("Developer: ______________________  Date: __________");
-    lines.push(c.yourName || "");
+    var mdSigs = contractSignaturesCache[c.id] || {};
+    lines.push(signatureMarkdownLine("Client", c.clientName, mdSigs.client));
+    lines.push(signatureMarkdownLine("Developer", c.yourName, mdSigs.developer));
     return lines.join("\n");
+  }
+
+  function signatureMarkdownLine(roleLabel, personName, sig) {
+    if (sig && sig.imageData) {
+      return roleLabel + ": " + (sig.name || personName || "") + " — signed " + fmtDate(String(sig.signedAt).slice(0, 10));
+    }
+    return roleLabel + ": " + (personName || "") + " — not yet signed";
   }
 
   /* ====================== VIEW: MARKETING ====================== */
@@ -2297,6 +2480,8 @@
             .catch(function () {
               showToast("Contract deleted, but couldn't confirm its share link was revoked — check it manually");
             });
+          fetch("/api/contracts/" + conId + "/signatures", { method: "DELETE" }).catch(function () {});
+          delete contractSignaturesCache[conId];
         }
       });
       return;
@@ -2340,7 +2525,7 @@
         fetch("/api/contracts/pdf", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(contractSharePayload(pdfC))
+          body: JSON.stringify(Object.assign({ contractId: pdfC.id }, contractSharePayload(pdfC)))
         })
           .then(function (res) {
             if (res.status === 401) { window.location.href = "/login"; throw new Error("unauthorized"); }
@@ -2420,6 +2605,42 @@
     }
     if ((el = e.target.closest("[data-copy-share-link]"))) {
       copyText(el.getAttribute("data-copy-share-link"));
+      return;
+    }
+    if ((el = e.target.closest("[data-open-signature]"))) {
+      var sigRole = el.getAttribute("data-open-signature");
+      var sigConId = el.getAttribute("data-signature-contract");
+      var sigCon = state.contracts.find(function (x) { return x.id === sigConId; });
+      if (!sigCon) return;
+      var sigForm = document.getElementById("contractForm");
+      if (sigForm && sigForm.getAttribute("data-contract-id") === sigConId) commitContractForm(sigCon);
+      openSignatureModal(sigConId, sigRole, sigRole === "developer" ? sigCon.yourName : sigCon.clientName);
+      return;
+    }
+    if ((el = e.target.closest("[data-clear-signature]"))) {
+      var clrRole = el.getAttribute("data-clear-signature");
+      var clrConId = el.getAttribute("data-signature-contract");
+      confirmAction("Clear this signature?", {
+        title: "Clear signature",
+        confirmLabel: "Clear signature",
+        danger: true,
+        onConfirm: function () {
+          fetch("/api/contracts/" + encodeURIComponent(clrConId) + "/signatures/" + clrRole, { method: "DELETE" })
+            .then(function (res) {
+              if (res.status === 401) { window.location.href = "/login"; throw new Error("unauthorized"); }
+              if (!res.ok) throw new Error("clear-failed");
+              var sigs = contractSignaturesCache[clrConId] || { developer: null, client: null };
+              sigs[clrRole] = null;
+              contractSignaturesCache[clrConId] = sigs;
+              showToast("Signature cleared");
+              render();
+            })
+            .catch(function (err) {
+              if (err && err.message === "unauthorized") return;
+              showToast("Couldn't clear that signature — try again");
+            });
+        }
+      });
       return;
     }
 
