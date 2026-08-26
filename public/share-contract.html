@@ -179,10 +179,12 @@
         var deliverables = (data.deliverables || []).filter(function (d) { return d && String(d).trim(); });
         var clientLabel = esc(data.clientName || "—") + (data.clientCompany ? " (" + esc(data.clientCompany) + ")" : "");
         var pdfUrl = "/api/public/contract-shares/" + encodeURIComponent(token) + "/pdf";
+        var accent = typeof data.clientAccent === "string" && /^#[0-9a-f]{6}$/i.test(data.clientAccent) ? data.clientAccent : "";
+        var swatch = accent ? '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + accent + ';margin-right:5px;" aria-hidden="true"></span>' : "";
 
-        var html = '<div class="card">';
+        var html = '<div class="card"' + (accent ? ' style="border-top:3px solid ' + accent + ';"' : "") + '>';
         html += '<div class="doc-head"><div><h2>' + esc(data.projectName || "Project agreement") + "</h2>" +
-          '<div class="p-meta">Between ' + esc(data.yourName || "—") + " and " + clientLabel + " &middot; " + fmtDate(data.contractDate || todayISO()) + "</div></div>" +
+          '<div class="p-meta">Between ' + esc(data.yourName || "—") + " and " + swatch + clientLabel + " &middot; " + fmtDate(data.contractDate || todayISO()) + "</div></div>" +
           '<a class="btn-pdf" href="' + pdfUrl + '">Download PDF</a></div>';
 
         html += '<div class="doc">';

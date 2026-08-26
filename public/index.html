@@ -662,6 +662,20 @@
   function projectById(id) { return state.projects.find(function (p) { return p.id === id; }); }
   function tasksForProject(id) { return state.tasks.filter(function (t) { return t.projectId === id; }); }
 
+  /* Resolves the client connected to a proposal/contract via its linked
+   * project, and its brand colour if one is set — used to give a document
+   * a subtle accent matching the client it's for, without ever requiring
+   * one (both fall back to nothing when there's no link or no colour). */
+  function clientForLinkedEntity(entity) {
+    if (!entity || !entity.projectId) return null;
+    var proj = projectById(entity.projectId);
+    return proj ? clientById(proj.clientId) : null;
+  }
+  function brandAccentFor(entity) {
+    var client = clientForLinkedEntity(entity);
+    return client && isValidHex(client.brandColor) ? client.brandColor : "";
+  }
+
   function projectProgress(id) {
     var tasks = tasksForProject(id);
     if (!tasks.length) return 0;
@@ -1264,6 +1278,7 @@
       id: uid("prop"),
       clientName: "",
       projectName: "",
+      projectId: null,
       overview: "",
       deliverables: [""],
       timeline: "",
@@ -1292,6 +1307,11 @@
       field("Client name", 'text', "p_clientName", pr.clientName),
       field("Project name", 'text', "p_projectName", pr.projectName)
     ]);
+    var proposalProjectOptions = '<option value="">No linked project</option>' + state.projects.map(function (proj) {
+      return '<option value="' + esc(proj.id) + '"' + (pr.projectId === proj.id ? " selected" : "") + '>' + esc(proj.name) + '</option>';
+    }).join("");
+    html += '<div class="field"><label for="p_projectId">Linked project (optional)</label><select id="p_projectId">' + proposalProjectOptions + '</select>' +
+      '<div class="hint">Lets this proposal pick up that project\'s client — used for a subtle brand accent on the document.</div></div>';
     html += textField("Overview", "p_overview", pr.overview, "One or two sentences on the problem and what this project solves.");
 
     html += '<label>Deliverables</label><div id="deliverablesWrap">' +
@@ -1308,7 +1328,8 @@
     html += textField("Additional terms", "p_terms", pr.terms, "Optional — revisions included, ownership, cancellation.");
     html += "</form>";
 
-    html += '<div class="card proposal-preview" id="proposalPreview">' + proposalPreviewHTML(pr) + "</div>";
+    var propAccent = brandAccentFor(pr);
+    html += '<div class="card proposal-preview" id="proposalPreview"' + (propAccent ? ' style="border-top:3px solid ' + propAccent + ';"' : "") + '>' + proposalPreviewHTML(pr) + "</div>";
     html += "</div>";
     return html;
   }
@@ -1325,8 +1346,10 @@
 
   function proposalPreviewHTML(pr) {
     var deliverables = pr.deliverables.filter(function (d) { return d && d.trim(); });
+    var propAccent = brandAccentFor(pr);
+    var propSwatch = propAccent ? '<span class="client-swatch" style="background:' + propAccent + ';" aria-hidden="true"></span> ' : "";
     var html = '<h2>' + esc(pr.projectName || "Project proposal") + "</h2>" +
-      '<div class="p-meta">Prepared for ' + esc(pr.clientName || "—") + " &middot; " + fmtDate(todayISO()) + "</div>";
+      '<div class="p-meta">Prepared for ' + propSwatch + esc(pr.clientName || "—") + " &middot; " + fmtDate(todayISO()) + "</div>";
     if (pr.overview) html += "<h3>Overview</h3><p>" + esc(pr.overview) + "</p>";
     if (deliverables.length) {
       html += "<h3>What's included</h3><ul>" + deliverables.map(function (d) { return "<li>" + esc(d) + "</li>"; }).join("") + "</ul>";
@@ -1517,7 +1540,8 @@
     html += field("Governing law", "text", "c_governingLaw", c.governingLaw);
     html += "</form>";
 
-    html += '<div class="card contract-preview" id="contractPreview">' + contractPreviewHTML(c) + "</div>";
+    var conAccent = brandAccentFor(c);
+    html += '<div class="card contract-preview" id="contractPreview"' + (conAccent ? ' style="border-top:3px solid ' + conAccent + ';"' : "") + '>' + contractPreviewHTML(c) + "</div>";
     html += "</div>";
     return html;
   }
@@ -1525,8 +1549,10 @@
   function contractPreviewHTML(c) {
     var deliverables = c.deliverables.filter(function (d) { return d && d.trim(); });
     var clientLabel = esc(c.clientName || "—") + (c.clientCompany ? " (" + esc(c.clientCompany) + ")" : "");
+    var conAccent = brandAccentFor(c);
+    var conSwatch = conAccent ? '<span class="client-swatch" style="background:' + conAccent + ';" aria-hidden="true"></span> ' : "";
     var html = '<h2>' + esc(c.projectName || "Project agreement") + "</h2>" +
-      '<div class="p-meta">Between ' + esc(c.yourName || "—") + " and " + clientLabel + " &middot; " + fmtDate(c.contractDate || todayISO()) + "</div>";
+      '<div class="p-meta">Between ' + esc(c.yourName || "—") + " and " + conSwatch + clientLabel + " &middot; " + fmtDate(c.contractDate || todayISO()) + "</div>";
     html += "<h3>Parties</h3><p>This agreement is between <strong>" + esc(c.yourName || "the Developer") + '</strong> ("the Developer")' +
       (c.yourAddress ? ", of " + esc(c.yourAddress) : "") + ", and <strong>" + esc(c.clientName || "the Client") + "</strong>" +
       (c.clientCompany ? " of " + esc(c.clientCompany) : "") + ' ("the Client")' + (c.clientAddress ? ", of " + esc(c.clientAddress) : "") + ".</p>";
@@ -2430,13 +2456,17 @@
       scheduleSave();
       return;
     }
-    if (e.target.matches("#proposalForm input, #proposalForm textarea")) {
+    if (e.target.matches("#proposalForm input, #proposalForm textarea, #proposalForm select")) {
       var f = document.getElementById("proposalForm");
       var pid3 = f.getAttribute("data-proposal-id");
       var pr3 = state.proposals.find(function (x) { return x.id === pid3; });
       commitProposalForm(pr3);
       var preview2 = document.getElementById("proposalPreview");
-      if (preview2) preview2.innerHTML = proposalPreviewHTML(pr3);
+      if (preview2) {
+        preview2.innerHTML = proposalPreviewHTML(pr3);
+        var pAccent = brandAccentFor(pr3);
+        preview2.style.borderTop = pAccent ? "3px solid " + pAccent : "";
+      }
       scheduleSave();
       return;
     }
@@ -2458,7 +2488,11 @@
       var con3 = state.contracts.find(function (x) { return x.id === cid3; });
       commitContractForm(con3);
       var cPreview2 = document.getElementById("contractPreview");
-      if (cPreview2) cPreview2.innerHTML = contractPreviewHTML(con3);
+      if (cPreview2) {
+        cPreview2.innerHTML = contractPreviewHTML(con3);
+        var cAccent2 = brandAccentFor(con3);
+        cPreview2.style.borderTop = cAccent2 ? "3px solid " + cAccent2 : "";
+      }
       scheduleSave();
       scheduleShareSync(con3);
       return;
@@ -2486,6 +2520,7 @@
   function commitProposalForm(pr) {
     pr.clientName = val("p_clientName");
     pr.projectName = val("p_projectName");
+    pr.projectId = val("p_projectId") || null;
     pr.overview = val("p_overview");
     pr.timeline = val("p_timeline");
     pr.price = val("p_price");
@@ -2531,7 +2566,8 @@
       contractDate: c.contractDate, overview: c.overview, deliverables: c.deliverables, exclusions: c.exclusions,
       startDate: c.startDate, timeline: c.timeline, price: c.price, paymentTerms: c.paymentTerms,
       revisions: c.revisions, ownership: c.ownership, cancellation: c.cancellation, liability: c.liability,
-      confidentiality: c.confidentiality, governingLaw: c.governingLaw
+      confidentiality: c.confidentiality, governingLaw: c.governingLaw,
+      clientAccent: brandAccentFor(c) || null
     };
   }
 

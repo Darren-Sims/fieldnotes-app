@@ -246,6 +246,11 @@ function contractPdfFilename(data) {
   return String(base).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "contract";
 }
 
+var HEX_COLOR_RE = /^#[0-9a-f]{6}$/i;
+function validAccentColor(value) {
+  return typeof value === "string" && HEX_COLOR_RE.test(value) ? value : null;
+}
+
 function renderContractPdf(res, data) {
   data = data || {};
   var filename = contractPdfFilename(data);
@@ -276,6 +281,17 @@ function renderContractPdf(res, data) {
     "Between " + (data.yourName || "—") + " and " + (data.clientName || "—") +
     (data.clientCompany ? " (" + data.clientCompany + ")" : "") + " · " + fmtDatePdf(data.contractDate || today)
   );
+
+  // A subtle accent bar in the connected client's brand colour, matching
+  // the same treatment shown in the app and on the public share page.
+  // Only drawn when the contract is linked to a project with a client that
+  // has a colour set — otherwise the document stays plain.
+  var accentColor = validAccentColor(data.clientAccent);
+  if (accentColor) {
+    doc.moveDown(0.5);
+    doc.rect(doc.page.margins.left, doc.y, doc.page.width - doc.page.margins.left - doc.page.margins.right, 2.5).fill(accentColor);
+    doc.moveDown(0.6);
+  }
 
   h2("Parties");
   body(
