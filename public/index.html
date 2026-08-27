@@ -1456,9 +1456,11 @@
     var accent = isValidHex(c.brandColor) ? c.brandColor : "";
     var accentStyle = accent ? ' style="border-top:3px solid ' + accent + ';"' : "";
     var swatch = accent ? '<span class="client-swatch" style="background:' + accent + ';" aria-hidden="true"></span>' : "";
+    var subtitle = c.company && c.industry ? c.company + " · " + c.industry
+      : c.company || c.industry || "No company set";
     return '<div class="card project-card" data-edit-client="' + c.id + '" tabindex="0" role="button" aria-label="Edit ' + esc(c.name) + '"' + accentStyle + '>' +
       '<div class="project-card-top"><div><h3>' + esc(c.name) + '</h3>' +
-      '<div class="project-client">' + swatch + esc(c.company || "No company set") + '</div></div>' +
+      '<div class="project-client">' + swatch + esc(subtitle) + '</div></div>' +
       '<span class="pill pill-neutral">' + projCount + " project" + (projCount === 1 ? "" : "s") + "</span></div>" +
       '<div class="project-meta-row"><span>' + (c.websiteUrl ? esc(hostFromUrl(c.websiteUrl)) : "No website") + '</span>' +
       '<button type="button" class="icon-btn" data-delete-client="' + c.id + '" title="Delete client" aria-label="Delete ' + esc(c.name) + '" style="margin:-6px -8px -6px 0;">Delete</button></div>' +
@@ -2210,10 +2212,11 @@
   }
 
   function clientFormHTML(c) {
-    c = c || { name: "", company: "", notes: "", websiteUrl: "", brandColor: "" };
+    c = c || { name: "", company: "", industry: "", notes: "", websiteUrl: "", brandColor: "" };
     var swatchColor = isValidHex(c.brandColor) ? c.brandColor : "#3d63d1";
     return '<div class="field"><label for="c_name">Name</label><input type="text" id="c_name" value="' + esc(c.name) + '"></div>' +
       '<div class="field"><label for="c_company">Company</label><input type="text" id="c_company" value="' + esc(c.company || "") + '"></div>' +
+      '<div class="field"><label for="c_industry">Industry</label><input type="text" id="c_industry" placeholder="e.g. Retail, Healthcare" value="' + esc(c.industry || "") + '"></div>' +
       '<div class="field"><label for="c_website">Website</label><input type="url" id="c_website" placeholder="https://clientsite.com" value="' + esc(c.websiteUrl || "") + '"></div>' +
       '<div class="field"><label for="c_brandColor">Brand colour</label>' +
       '<div class="color-field-row">' +
@@ -2239,6 +2242,7 @@
       var payload = {
         name: name,
         company: document.getElementById("c_company").value.trim(),
+        industry: document.getElementById("c_industry").value.trim(),
         websiteUrl: document.getElementById("c_website").value.trim(),
         brandColor: isValidHex(rawColor) ? normalizeHex(rawColor) : "",
         notes: document.getElementById("c_notes").value.trim()
