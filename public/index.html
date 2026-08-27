@@ -345,6 +345,23 @@
   .detail-tags { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
   .detail-desc { color: var(--text-secondary); font-size: 14px; max-width: 68ch; margin-top: 12px; }
 
+  .project-progress-bar { margin: 24px 0 8px; }
+  .project-progress-track { height: 8px; border-radius: 999px; background: var(--surface-sunken); border: 1px solid var(--border); overflow: hidden; }
+  .project-progress-fill { height: 100%; background: var(--accent); border-radius: inherit; }
+  .project-progress-meta { display: flex; align-items: center; justify-content: space-between; font-size: 12.5px; color: var(--text-secondary); margin-top: 7px; gap: 10px; flex-wrap: wrap; }
+  .project-progress-meta .overdue { color: var(--danger-text); font-weight: 600; }
+
+  .panel-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin-top: 22px; align-items: start; }
+  .panel { grid-column: span 1; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--surface-raised-shadow); overflow: hidden; }
+  .panel-full { grid-column: 1 / -1; }
+  .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 13px 18px; background: var(--accent-tint); border-bottom: 1px solid var(--border); }
+  .panel-head h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--accent-strong); }
+  .panel-count { font-family: var(--font-mono); font-size: 11.5px; color: var(--accent-strong); background: var(--surface); border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px; }
+  .panel-body { padding: 16px 18px; }
+  .panel-body .board,
+  .panel-body .content-board { margin-top: 0; }
+  @media (max-width: 640px) { .panel-grid { grid-template-columns: 1fr; } }
+
   .board { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 22px; align-items: start; }
   .board-col { background: var(--surface-sunken); border-radius: var(--radius-lg); padding: 12px; min-height: 60px; }
   .board-col-head { display: flex; align-items: center; justify-content: space-between; padding: 2px 4px 10px; }
@@ -695,6 +712,14 @@
   function isOverdue(iso) {
     if (!iso) return false;
     return iso < todayISO();
+  }
+
+  function daysUntil(iso) {
+    if (!iso) return null;
+    var today = new Date(todayISO() + "T00:00:00");
+    var target = new Date(iso + "T00:00:00");
+    if (isNaN(target.getTime())) return null;
+    return Math.round((target - today) / 86400000);
   }
 
   function clientById(id) { return state.clients.find(function (c) { return c.id === id; }); }
@@ -1076,6 +1101,14 @@
 
   /* ====================== VIEW: PROJECT DETAIL ====================== */
 
+  function panelHTML(title, bodyHtml, opts) {
+    opts = opts || {};
+    var cls = "panel" + (opts.full ? " panel-full" : "");
+    var count = (opts.count === undefined || opts.count === null) ? "" : '<span class="panel-count">' + opts.count + "</span>";
+    return '<div class="' + cls + '"><div class="panel-head"><h2>' + esc(title) + "</h2>" + count + '</div>' +
+      '<div class="panel-body">' + bodyHtml + "</div></div>";
+  }
+
   function viewProjectDetail(id) {
     var p = projectById(id);
     if (!p) return pageHead("Project not found", "") + emptyState("This project is gone", "It may have been deleted.", '<button class="btn" data-nav="#/projects">Back to projects</button>');
@@ -1104,7 +1137,22 @@
       '<button class="btn btn-sm btn-danger-quiet" data-delete-project="' + p.id + '">Delete</button>' +
       "</div></div>";
 
-    html += '<div class="board">' + TASK_COLS.map(function (col) {
+    var progress = projectProgress(id);
+    var doneCount = tasks.filter(function (t) { return t.status === "done"; }).length;
+    var daysLeft = daysUntil(p.dueDate);
+    var dueLabel = "No due date set";
+    if (daysLeft !== null) {
+      dueLabel = daysLeft > 0 ? "Due in " + daysLeft + " day" + (daysLeft === 1 ? "" : "s")
+        : daysLeft === 0 ? "Due today"
+        : Math.abs(daysLeft) + " day" + (Math.abs(daysLeft) === 1 ? "" : "s") + " overdue";
+    }
+    html += '<div class="project-progress-bar">' +
+      '<div class="project-progress-track"><div class="project-progress-fill" style="width:' + progress + '%"></div></div>' +
+      '<div class="project-progress-meta"><span>' + progress + "% complete &middot; " + doneCount + " of " + tasks.length + " task" + (tasks.length === 1 ? "" : "s") + '</span>' +
+      '<span' + (daysLeft !== null && daysLeft < 0 ? ' class="overdue"' : "") + '>' + dueLabel + "</span></div>" +
+      "</div>";
+
+    var taskBoardHtml = '<div class="board">' + TASK_COLS.map(function (col) {
       var colTasks = tasks.filter(function (t) { return t.status === col.key; });
       return '<div class="board-col" data-col="' + col.key + '">' +
         '<div class="board-col-head"><h3>' + col.label + '</h3><span class="board-count">' + colTasks.length + "</span></div>" +
@@ -1113,22 +1161,22 @@
         "</div>";
     }).join("") + "</div>";
 
-    html += '<div class="section-head"><h2>Notes</h2></div>';
-    html += '<div class="card" style="padding:16px 18px;">' + noteComposerHTML(p.id) +
+    var notesHtml = noteComposerHTML(p.id) +
       '<div class="note-log">' + (p.notes || []).slice().reverse().map(noteItemHTML).join("") +
-      (p.notes && p.notes.length ? "" : '<p class="hint" style="margin-top:10px;">No notes yet.</p>') + "</div>" +
-      "</div>";
-
-    html += '<div class="section-head"><h2>Contract</h2></div>';
-    html += contractSectionHTML(p);
+      (p.notes && p.notes.length ? "" : '<p class="hint" style="margin-top:10px;">No notes yet.</p>') + "</div>";
 
     loadContentPosts(p.id);
-    html += '<div class="section-head"><h2>Content</h2></div>';
-    html += contentSectionHTML(p);
-
     loadFileAttachments(p.id);
-    html += '<div class="section-head"><h2>Attachments</h2></div>';
-    html += attachmentsSectionHTML(p);
+    var linkedContracts = state.contracts.filter(function (c) { return c.projectId === p.id; });
+    var attachmentCount = (p.attachments || []).length + (fileAttachmentsCache[p.id] || []).length;
+
+    html += '<div class="panel-grid">' +
+      panelHTML("Tasks", taskBoardHtml, { full: true, count: tasks.length }) +
+      panelHTML("Content pipeline", contentSectionHTML(p), { full: true }) +
+      panelHTML("Notes", notesHtml, { count: (p.notes || []).length }) +
+      panelHTML("Contract", contractSectionHTML(p), { count: linkedContracts.length }) +
+      panelHTML("Docs & files", attachmentsSectionHTML(p), { count: attachmentCount }) +
+      "</div>";
 
     return html;
   }
@@ -1351,8 +1399,7 @@
     });
     var items = links.concat(files).sort(function (x, y) { return new Date(y.date) - new Date(x.date); });
 
-    var html = '<div class="card" style="padding:16px 18px;">' +
-      '<p class="hint" style="margin-bottom:14px;">Link out to files that live elsewhere (Drive, Dropbox, your inbox), or upload one directly (up to 10MB).</p>' +
+    var html = '<p class="hint" style="margin-bottom:14px;">Link out to files that live elsewhere (Drive, Dropbox, your inbox), or upload one directly (up to 10MB).</p>' +
       '<div class="field" style="margin-bottom:8px;"><label for="attLabelInput">What is it</label>' +
       '<input type="text" id="attLabelInput" placeholder="e.g. Signed proposal, March 2025"></div>' +
       '<div class="field" style="margin-bottom:10px;"><label for="attUrlInput">Link</label>' +
@@ -1382,7 +1429,6 @@
     } else {
       html += '<p class="hint" style="margin-top:14px;">No links or files added yet.</p>';
     }
-    html += "</div>";
     return html;
   }
 
@@ -1679,14 +1725,12 @@
   function contractSectionHTML(p) {
     var linked = state.contracts.filter(function (c) { return c.projectId === p.id; });
     if (!linked.length) {
-      return '<div class="card" style="padding:16px 18px;">' +
-        '<p class="hint" style="margin-bottom:10px;">No contract linked to this project yet.</p>' +
-        '<button type="button" class="btn btn-sm" data-new-contract-for-project="' + p.id + '">Create contract</button>' +
-        "</div>";
+      return '<p class="hint" style="margin-bottom:10px;">No contract linked to this project yet.</p>' +
+        '<button type="button" class="btn btn-sm" data-new-contract-for-project="' + p.id + '">Create contract</button>';
     }
-    return '<div class="card" style="padding:8px 4px;">' + linked.map(function (c) {
+    return '<div style="margin:-4px;">' + linked.map(function (c) {
       var shareUrl = c.shareToken ? (location.origin + "/share/contract/" + c.shareToken) : "";
-      return '<div class="list-row" style="padding:10px 14px;">' +
+      return '<div class="list-row" style="padding:10px 4px;">' +
         '<div class="list-row-main"><div class="list-row-title">' + esc(c.projectName || "Untitled contract") + '</div>' +
         '<div class="list-row-sub">' + (c.price ? money(c.price) + " &middot; " : "") + (c.shareToken ? "Link shared" : "Not shared") + "</div></div>" +
         '<div style="display:flex;gap:6px;flex-wrap:wrap;">' +
