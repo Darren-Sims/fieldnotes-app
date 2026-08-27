@@ -362,6 +362,19 @@
   .panel-body .content-board { margin-top: 0; }
   @media (max-width: 640px) { .panel-grid { grid-template-columns: 1fr; } }
 
+  .task-group { margin-top: 22px; }
+  .task-group:first-child { margin-top: 0; }
+  .task-group-head { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+  .task-group-head h3 { font-size: 14px; }
+  .task-group-head .board-count { font-family: var(--font-mono); font-size: 12px; color: var(--text-secondary); background: var(--surface-sunken); border-radius: 999px; padding: 2px 9px; }
+  .task-group-actions { margin-left: auto; display: flex; gap: 2px; }
+  .task-group-add-row { margin-top: 14px; }
+  .task-group-add-row .task-add-input {
+    width: 100%; border: 1px dashed var(--border-interactive); background: none;
+    border-radius: var(--radius-md); padding: 9px 10px; font-size: 13px; color: var(--text-primary);
+  }
+  .task-group-add-row .task-add-input::placeholder { color: var(--text-secondary); }
+
   .board { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 22px; align-items: start; }
   .board-col { background: var(--surface-sunken); border-radius: var(--radius-lg); padding: 12px; min-height: 60px; }
   .board-col-head { display: flex; align-items: center; justify-content: space-between; padding: 2px 4px 10px; }
@@ -524,6 +537,7 @@
       clients: [],
       projects: [],
       tasks: [],
+      taskGroups: [],
       proposals: [],
       contracts: [],
       marketingDrafts: [],
@@ -725,6 +739,11 @@
   function clientById(id) { return state.clients.find(function (c) { return c.id === id; }); }
   function projectById(id) { return state.projects.find(function (p) { return p.id === id; }); }
   function tasksForProject(id) { return state.tasks.filter(function (t) { return t.projectId === id; }); }
+
+  function taskGroupsForProject(id) {
+    return state.taskGroups.filter(function (g) { return g.projectId === id; })
+      .sort(function (a, b) { return a.createdAt.localeCompare(b.createdAt); });
+  }
 
   /* Resolves the client connected to a proposal/contract via its linked
    * project, and its brand colour if one is set — used to give a document
@@ -1157,14 +1176,7 @@
       '<span' + (daysLeft !== null && daysLeft < 0 ? ' class="overdue"' : "") + '>' + dueLabel + "</span></div>" +
       "</div>";
 
-    var taskBoardHtml = '<div class="board">' + TASK_COLS.map(function (col) {
-      var colTasks = tasks.filter(function (t) { return t.status === col.key; });
-      return '<div class="board-col" data-col="' + col.key + '">' +
-        '<div class="board-col-head"><h3>' + col.label + '</h3><span class="board-count">' + colTasks.length + "</span></div>" +
-        colTasks.map(function (t) { return taskCardHTML(t); }).join("") +
-        (col.key === "todo" ? '<div class="task-add-row"><input class="task-add-input" type="text" placeholder="Add a task and press enter" data-new-task="' + p.id + '"></div>' : "") +
-        "</div>";
-    }).join("") + "</div>";
+    var taskBoardHtml = taskGroupsSectionHTML(p, tasks);
 
     var notesHtml = noteComposerHTML(p.id) +
       '<div class="note-log">' + (p.notes || []).slice().reverse().map(function (n) { return noteItemHTML(n, p.id); }).join("") +
@@ -1467,6 +1479,54 @@
     } else {
       html += '<p class="hint" style="margin-top:14px;">No links or files added yet.</p>';
     }
+    return html;
+  }
+
+  function miniBoardHTML(colTasks, groupId, projectId) {
+    return '<div class="board">' + TASK_COLS.map(function (col) {
+      var inCol = colTasks.filter(function (t) { return t.status === col.key; });
+      return '<div class="board-col" data-col="' + col.key + '">' +
+        '<div class="board-col-head"><h3>' + col.label + '</h3><span class="board-count">' + inCol.length + "</span></div>" +
+        inCol.map(function (t) { return taskCardHTML(t); }).join("") +
+        (col.key === "todo" ? '<div class="task-add-row"><input class="task-add-input" type="text" placeholder="Add a task and press enter" data-new-task="' + projectId + '" data-task-group="' + groupId + '"></div>' : "") +
+        "</div>";
+    }).join("") + "</div>";
+  }
+
+  function taskGroupsSectionHTML(p, tasks) {
+    var groups = taskGroupsForProject(p.id);
+    var byGroup = {};
+    tasks.forEach(function (t) {
+      var key = t.groupId || "";
+      (byGroup[key] = byGroup[key] || []).push(t);
+    });
+    var ungrouped = byGroup[""] || [];
+
+    // No named Project Tasks yet: keep the plain single board, unchanged, until Darren opts in.
+    if (!groups.length) {
+      return miniBoardHTML(ungrouped, "", p.id) +
+        '<div class="task-group-add-row"><input class="task-add-input" type="text" placeholder="Add a Project Task, e.g. Logo, Website" data-new-taskgroup="' + p.id + '"></div>';
+    }
+
+    var html = "";
+    if (ungrouped.length) {
+      html += '<div class="task-group"><div class="task-group-head"><h3>General</h3>' +
+        '<span class="board-count">' + ungrouped.filter(function (t) { return t.status === "done"; }).length + "/" + ungrouped.length + "</span></div>" +
+        miniBoardHTML(ungrouped, "", p.id) + "</div>";
+    }
+    html += groups.map(function (g) {
+      var groupTasks = byGroup[g.id] || [];
+      var done = groupTasks.filter(function (t) { return t.status === "done"; }).length;
+      return '<div class="task-group" data-taskgroup="' + g.id + '"><div class="task-group-head"><h3>' + esc(g.name) + '</h3>' +
+        '<span class="board-count">' + done + "/" + groupTasks.length + '</span>' +
+        '<span class="task-group-actions">' +
+        '<button type="button" class="icon-btn" data-rename-taskgroup="' + g.id + '" title="Rename ' + esc(g.name) + '">Rename</button>' +
+        '<button type="button" class="icon-btn" data-delete-taskgroup="' + g.id + '" title="Delete ' + esc(g.name) + '">Delete</button>' +
+        "</span></div>" +
+        miniBoardHTML(groupTasks, g.id, p.id) + "</div>";
+    }).join("");
+
+    html += '<div class="task-group-add-row"><input class="task-add-input" type="text" placeholder="Add another Project Task" data-new-taskgroup="' + p.id + '"></div>';
     return html;
   }
 
@@ -2463,6 +2523,7 @@
           mutate(function () {
             state.projects = state.projects.filter(function (p) { return p.id !== pid; });
             state.tasks = state.tasks.filter(function (t) { return t.projectId !== pid; });
+            state.taskGroups = state.taskGroups.filter(function (g) { return g.projectId !== pid; });
           });
           navigate("#/projects");
           showToast("Project deleted");
@@ -2487,6 +2548,43 @@
     }
 
     if ((el = e.target.closest("[data-open-task]"))) { openTaskModal(el.getAttribute("data-open-task")); return; }
+
+    if ((el = e.target.closest("[data-rename-taskgroup]"))) {
+      var renameGroupId = el.getAttribute("data-rename-taskgroup");
+      var groupToRename = state.taskGroups.find(function (g) { return g.id === renameGroupId; });
+      if (!groupToRename) return;
+      var dlg2 = openDialog("Rename Project Task", '<div class="field"><label for="tg_name">Name</label><input type="text" id="tg_name" value="' + esc(groupToRename.name) + '"></div>' +
+        '<div class="dialog-actions"><button type="button" class="btn" data-close-dialog="1">Cancel</button><button type="button" class="btn btn-primary" id="saveTaskGroupBtn">Save</button></div>');
+      var nameInput = dlg2.querySelector("#tg_name");
+      nameInput.focus();
+      nameInput.select();
+      dlg2.querySelector("#saveTaskGroupBtn").addEventListener("click", function () {
+        var newName = nameInput.value.trim();
+        if (!newName) { nameInput.focus(); return; }
+        mutate(function () { groupToRename.name = newName; });
+        dlg2.close();
+      });
+      return;
+    }
+
+    if ((el = e.target.closest("[data-delete-taskgroup]"))) {
+      var delGroupId = el.getAttribute("data-delete-taskgroup");
+      var delGroup = state.taskGroups.find(function (g) { return g.id === delGroupId; });
+      if (!delGroup) return;
+      confirmAction('Delete "' + delGroup.name + '"? Its tasks move to General — nothing is deleted.', {
+        title: "Delete Project Task",
+        confirmLabel: "Delete",
+        danger: true,
+        onConfirm: function () {
+          mutate(function () {
+            state.tasks.forEach(function (t) { if (t.groupId === delGroupId) t.groupId = ""; });
+            state.taskGroups = state.taskGroups.filter(function (g) { return g.id !== delGroupId; });
+          });
+          showToast("Project Task deleted");
+        }
+      });
+      return;
+    }
 
     if ((el = e.target.closest("[data-set-note-type]"))) {
       var typeProjId = el.getAttribute("data-set-note-type");
@@ -3259,10 +3357,20 @@
     if (e.key === "Enter" && e.target.matches("[data-new-task]")) {
       e.preventDefault();
       var projId = e.target.getAttribute("data-new-task");
+      var groupId = e.target.getAttribute("data-task-group") || "";
       var title = e.target.value.trim();
       if (!title) return;
       mutate(function () {
-        state.tasks.push({ id: uid("task"), projectId: projId, title: title, status: "todo", dueDate: "", createdAt: new Date().toISOString() });
+        state.tasks.push({ id: uid("task"), projectId: projId, groupId: groupId, title: title, status: "todo", dueDate: "", createdAt: new Date().toISOString() });
+      });
+    }
+    if (e.key === "Enter" && e.target.matches("[data-new-taskgroup]")) {
+      e.preventDefault();
+      var tgProjId = e.target.getAttribute("data-new-taskgroup");
+      var tgName = e.target.value.trim();
+      if (!tgName) return;
+      mutate(function () {
+        state.taskGroups.push({ id: uid("tg"), projectId: tgProjId, name: tgName, createdAt: new Date().toISOString() });
       });
     }
     if ((e.key === "Enter" || e.key === " ") && e.target.matches('[role="button"][tabindex="0"]')) {
@@ -3276,7 +3384,12 @@
   function openTaskModal(taskId) {
     var t = state.tasks.find(function (x) { return x.id === taskId; });
     if (!t) return;
+    var taskGroupOpts = taskGroupsForProject(t.projectId);
     var body = '<div class="field"><label for="t_title">Title</label><input type="text" id="t_title" value="' + esc(t.title) + '"></div>' +
+      (taskGroupOpts.length ? '<div class="field"><label for="t_group">Project Task</label><select id="t_group">' +
+        '<option value=""' + (!t.groupId ? " selected" : "") + '>General</option>' +
+        taskGroupOpts.map(function (g) { return '<option value="' + g.id + '"' + (t.groupId === g.id ? " selected" : "") + ">" + esc(g.name) + "</option>"; }).join("") +
+        "</select></div>" : "") +
       '<div class="field-row"><div class="field"><label for="t_status">Status</label><select id="t_status">' +
       TASK_COLS.map(function (c) { return '<option value="' + c.key + '"' + (c.key === t.status ? " selected" : "") + ">" + c.label + "</option>"; }).join("") +
       '</select></div><div class="field"><label for="t_due">Due date</label><input type="date" id="t_due" value="' + esc(t.dueDate || "") + '"></div></div>' +
@@ -3292,6 +3405,8 @@
         t.status = document.getElementById("t_status").value;
         t.dueDate = document.getElementById("t_due").value;
         t.note = document.getElementById("t_note").value.trim();
+        var groupSelect = document.getElementById("t_group");
+        if (groupSelect) t.groupId = groupSelect.value;
         if (t.status === "done" && wasNotDone) t.completedAt = new Date().toISOString();
       });
       dlg.close();
