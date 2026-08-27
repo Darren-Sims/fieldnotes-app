@@ -808,6 +808,7 @@
     if (r.name === "overview") view = viewOverview();
     else if (r.name === "projects" && r.id) view = viewProjectDetail(r.id);
     else if (r.name === "projects") view = viewProjects();
+    else if (r.name === "clients" && r.id) view = viewClientDetail(r.id);
     else if (r.name === "clients") view = viewClients();
     else if (r.name === "proposals" && r.id) view = viewProposalEditor(r.id);
     else if (r.name === "proposals") view = viewProposals();
@@ -1568,13 +1569,42 @@
     var swatch = accent ? '<span class="client-swatch" style="background:' + accent + ';" aria-hidden="true"></span>' : "";
     var subtitle = c.company && c.industry ? c.company + " · " + c.industry
       : c.company || c.industry || "No company set";
-    return '<div class="card project-card" data-edit-client="' + c.id + '" tabindex="0" role="button" aria-label="Edit ' + esc(c.name) + '"' + accentStyle + '>' +
+    return '<div class="card project-card" data-nav="#/clients/' + c.id + '" tabindex="0" role="button" aria-label="Open ' + esc(c.name) + '"' + accentStyle + '>' +
       '<div class="project-card-top"><div><h3>' + esc(c.name) + '</h3>' +
       '<div class="project-client">' + swatch + esc(subtitle) + '</div></div>' +
       '<span class="pill pill-neutral">' + projCount + " project" + (projCount === 1 ? "" : "s") + "</span></div>" +
-      '<div class="project-meta-row"><span>' + (c.websiteUrl ? esc(hostFromUrl(c.websiteUrl)) : "No website") + '</span>' +
-      '<button type="button" class="icon-btn" data-delete-client="' + c.id + '" title="Delete client" aria-label="Delete ' + esc(c.name) + '" style="margin:-6px -8px -6px 0;">Delete</button></div>' +
+      '<div class="project-meta-row"><span>' + (c.websiteUrl ? esc(hostFromUrl(c.websiteUrl)) : "No website") + '</span></div>' +
       "</div>";
+  }
+
+  function viewClientDetail(id) {
+    var c = clientById(id);
+    if (!c) return pageHead("Client not found", "") + emptyState("This client is gone", "It may have been deleted.", '<button class="btn" data-nav="#/clients">Back to clients</button>');
+
+    var accent = isValidHex(c.brandColor) ? c.brandColor : "";
+    var swatch = accent ? '<span class="client-swatch" style="background:' + accent + ';" aria-hidden="true"></span> ' : "";
+    var subtitle = c.company && c.industry ? c.company + " · " + c.industry : c.company || c.industry || "";
+
+    var html = '<button class="back-link" data-nav="#/clients">&larr; All clients</button>';
+    html += '<div class="detail-head"' + (accent ? ' style="border-top:3px solid ' + accent + ';padding-top:14px;"' : "") + '><div>' +
+      (subtitle ? '<div class="page-eyebrow">' + swatch + esc(subtitle) + "</div>" : "") +
+      "<h1>" + esc(c.name) + "</h1>" +
+      (c.websiteUrl ? '<p class="detail-desc"><a class="client-link" href="' + esc(websiteHref(c.websiteUrl)) + '" target="_blank" rel="noopener noreferrer">' + esc(hostFromUrl(c.websiteUrl)) + "</a></p>" : "") +
+      (c.notes ? '<p class="detail-desc">' + esc(c.notes) + "</p>" : "") +
+      "</div>" +
+      '<div style="display:flex;gap:8px;flex:none;">' +
+      '<button class="btn btn-sm" data-edit-client="' + c.id + '">Edit</button>' +
+      '<button class="btn btn-sm btn-danger-quiet" data-delete-client="' + c.id + '">Delete</button>' +
+      "</div></div>";
+
+    var projects = state.projects.filter(function (p) { return p.clientId === c.id; });
+    html += '<div class="section-head"><h2>Projects</h2><button class="see-all" data-new-project-for-client="' + c.id + '">New project &rarr;</button></div>';
+    if (!projects.length) {
+      html += emptyState("No projects yet", "Start a project for " + c.name + " to track its tasks, contract and files.", '<button class="btn btn-primary" data-new-project-for-client="' + c.id + '">Start a project</button>');
+    } else {
+      html += '<div class="project-grid">' + projects.map(projectCardHTML).join("") + "</div>";
+    }
+    return html;
   }
 
   /* ====================== VIEW: PROPOSALS ====================== */
@@ -2445,6 +2475,11 @@
 
     if ((el = e.target.closest("[data-nav]"))) { navigate(el.getAttribute("data-nav")); return; }
 
+    if ((el = e.target.closest("[data-new-project-for-client]"))) {
+      openProjectModal(null, { clientId: el.getAttribute("data-new-project-for-client") });
+      return;
+    }
+
     if ((el = e.target.closest("[data-logout]"))) {
       fetch("/api/logout", { method: "POST" }).then(function () { window.location.href = "/login"; }).catch(function () { window.location.href = "/login"; });
       return;
@@ -2464,6 +2499,7 @@
       var used = state.projects.some(function (p) { return p.clientId === cid; });
       var doDeleteClient = function () {
         mutate(function () { state.clients = state.clients.filter(function (c) { return c.id !== cid; }); });
+        navigate("#/clients");
         showToast("Client deleted");
       };
       if (used) {
