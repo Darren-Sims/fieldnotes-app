@@ -423,7 +423,7 @@
 
   .note-type-tabs { display: flex; gap: 6px; margin-bottom: 12px; }
   .note-log { margin-top: 8px; }
-  .note-item { padding: 12px 0; border-bottom: 1px solid var(--border); display: flex; gap: 10px; }
+  .note-item { padding: 12px 0; border-bottom: 1px solid var(--border); display: flex; gap: 10px; align-items: flex-start; }
   .note-item:last-child { border-bottom: none; }
   .note-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); margin-top: 6px; flex: none; }
   .note-meta { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; }
@@ -1162,7 +1162,7 @@
     }).join("") + "</div>";
 
     var notesHtml = noteComposerHTML(p.id) +
-      '<div class="note-log">' + (p.notes || []).slice().reverse().map(noteItemHTML).join("") +
+      '<div class="note-log">' + (p.notes || []).slice().reverse().map(function (n) { return noteItemHTML(n, p.id); }).join("") +
       (p.notes && p.notes.length ? "" : '<p class="hint" style="margin-top:10px;">No notes yet.</p>') + "</div>";
 
     loadContentPosts(p.id);
@@ -1476,14 +1476,17 @@
       '<button class="btn btn-sm" data-add-note="' + projectId + '">' + (isMeeting ? "Add meeting note" : "Add note") + "</button>";
   }
 
-  function noteItemHTML(n) {
+  function noteItemHTML(n, projectId) {
     var isMeeting = n.type === "meeting";
     var meta = isMeeting
       ? '<div class="note-meta"><span class="pill pill-accent">Meeting</span> <span class="tabular">' + fmtDate(n.meetingDate || n.at.slice(0, 10)) + "</span>" +
         (n.attendees ? " &middot; with " + esc(n.attendees) : "") + "</div>"
       : "";
-    return '<div class="note-item"><span class="note-dot" aria-hidden="true"></span><div>' + meta +
-      '<div class="note-text">' + esc(n.text) + '</div><div class="note-time">' + fmtDateTime(n.at) + "</div></div></div>";
+    return '<div class="note-item"><span class="note-dot" aria-hidden="true"></span>' +
+      '<div style="flex:1;min-width:0;">' + meta +
+      '<div class="note-text">' + esc(n.text) + '</div><div class="note-time">' + fmtDateTime(n.at) + "</div></div>" +
+      '<button type="button" class="icon-btn" data-delete-note="' + n.id + '" data-note-project="' + projectId + '" title="Delete note" aria-label="Delete note" style="flex:none;">Delete</button>' +
+      "</div>";
   }
 
   /* ====================== VIEW: CLIENTS ====================== */
@@ -2801,6 +2804,22 @@
         });
       });
       showToast("Link added");
+      return;
+    }
+    if ((el = e.target.closest("[data-delete-note]"))) {
+      var delNoteId = el.getAttribute("data-delete-note");
+      var delNoteProj = el.getAttribute("data-note-project");
+      confirmAction("Delete this note? This can't be undone.", {
+        title: "Delete note",
+        confirmLabel: "Delete note",
+        danger: true,
+        onConfirm: function () {
+          var proj = projectById(delNoteProj);
+          if (!proj) return;
+          mutate(function () { proj.notes = (proj.notes || []).filter(function (n) { return n.id !== delNoteId; }); });
+          showToast("Note deleted");
+        }
+      });
       return;
     }
     if ((el = e.target.closest("[data-delete-attachment]"))) {
