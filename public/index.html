@@ -794,6 +794,8 @@
     else if (r.name === "proposals") view = viewProposals();
     else if (r.name === "contracts" && r.id) view = viewContractEditor(r.id);
     else if (r.name === "contracts") view = viewContracts();
+    else if (r.name === "content" && r.id) view = viewContentDetail(r.id);
+    else if (r.name === "content") view = viewContentList();
     else if (r.name === "marketing") view = viewMarketing();
     else view = viewOverview();
 
@@ -808,6 +810,7 @@
     clients: '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="5.2" r="2.7"/><path d="M2.3 14c.6-3 2.8-4.7 5.7-4.7s5.1 1.7 5.7 4.7"/></svg>',
     proposals: '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3.5 1.8h6l3 3v8.4c0 .55-.45 1-1 1h-8c-.55 0-1-.45-1-1v-10.4c0-.55.45-1 1-1z"/><path d="M9.2 1.8v3.2h3.1"/><path d="M5.3 8.4h5.4M5.3 10.7h5.4M5.3 6.1h2.3"/></svg>',
     contracts: '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3.5 1.8h6l3 3v8.4c0 .55-.45 1-1 1h-8c-.55 0-1-.45-1-1v-10.4c0-.55.45-1 1-1z"/><path d="M9.2 1.8v3.2h3.1"/><path d="M5.3 11.3c1-1.5 1.8-1.5 2.5-.5.7 1 1.5 1 2.5-.5"/></svg>',
+    content: '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1.8" y="2.3" width="12.4" height="3.2" rx="1"/><rect x="1.8" y="6.4" width="12.4" height="3.2" rx="1"/><rect x="1.8" y="10.5" width="12.4" height="3.2" rx="1"/></svg>',
     marketing: '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1.8 6.3v3.4c0 .5.4.9.9.9h1.1l3.6 2.8V2.6L3.8 5.4H2.7c-.5 0-.9.4-.9.9z"/><path d="M10.4 5.1c.9.7 1.4 1.8 1.4 2.9s-.5 2.2-1.4 2.9M12.7 3.1c1.5 1.2 2.4 3 2.4 4.9s-.9 3.7-2.4 4.9"/></svg>'
   };
 
@@ -826,6 +829,7 @@
       link("overview", "Overview") +
       link("clients", "Clients") +
       link("projects", "Projects") +
+      link("content", "Content") +
       link("proposals", "Proposals") +
       link("contracts", "Contracts") +
       link("marketing", "Marketing") +
@@ -1133,6 +1137,7 @@
       (p.description ? '<p class="detail-desc">' + esc(p.description) + "</p>" : "") +
       "</div>" +
       '<div style="display:flex;gap:8px;flex:none;">' +
+      '<button class="btn btn-sm" data-nav="#/content/' + p.id + '">Content</button>' +
       '<button class="btn btn-sm" data-edit-project="' + p.id + '">Edit</button>' +
       '<button class="btn btn-sm btn-danger-quiet" data-delete-project="' + p.id + '">Delete</button>' +
       "</div></div>";
@@ -1165,14 +1170,12 @@
       '<div class="note-log">' + (p.notes || []).slice().reverse().map(function (n) { return noteItemHTML(n, p.id); }).join("") +
       (p.notes && p.notes.length ? "" : '<p class="hint" style="margin-top:10px;">No notes yet.</p>') + "</div>";
 
-    loadContentPosts(p.id);
     loadFileAttachments(p.id);
     var linkedContracts = state.contracts.filter(function (c) { return c.projectId === p.id; });
     var attachmentCount = (p.attachments || []).length + (fileAttachmentsCache[p.id] || []).length;
 
     html += '<div class="panel-grid">' +
       panelHTML("Tasks", taskBoardHtml, { full: true, count: tasks.length }) +
-      panelHTML("Content pipeline", contentSectionHTML(p), { full: true }) +
       panelHTML("Notes", notesHtml, { count: (p.notes || []).length }) +
       panelHTML("Contract", contractSectionHTML(p), { count: linkedContracts.length }) +
       panelHTML("Docs & files", attachmentsSectionHTML(p), { count: attachmentCount }) +
@@ -1301,6 +1304,41 @@
       '<button type="button" class="btn btn-sm" data-copy-share-link="' + esc(url) + '">Copy link</button>' +
       '<button type="button" class="btn btn-sm btn-danger-quiet" data-stop-share-content="' + p.id + '">Stop sharing</button>' +
       "</div>";
+  }
+
+  /* ====================== VIEW: CONTENT ====================== */
+
+  function viewContentList() {
+    var html = pageHead("Content", "Pick a project to plan and approve what goes out on LinkedIn.");
+    if (!state.projects.length) {
+      return html + emptyState("No projects yet", "Add a project first, then come back here to plan its content.", '<button class="btn btn-primary" data-nav="#/projects">Go to projects</button>');
+    }
+    html += '<div class="project-grid">' + state.projects.map(contentProjectCardHTML).join("") + "</div>";
+    return html;
+  }
+
+  function contentProjectCardHTML(p) {
+    var client = clientById(p.clientId);
+    var accent = client && isValidHex(client.brandColor) ? client.brandColor : "";
+    var accentStyle = accent ? ' style="border-top:3px solid ' + accent + ';"' : "";
+    var swatch = accent ? '<span class="client-swatch" style="background:' + accent + ';" aria-hidden="true"></span>' : "";
+    return '<div class="card project-card" data-nav="#/content/' + p.id + '" tabindex="0" role="button" aria-label="Open content queue for ' + esc(p.name) + '"' + accentStyle + '>' +
+      '<div class="project-card-top"><div><h3>' + esc(p.name) + '</h3>' +
+      '<div class="project-client">' + swatch + esc(client ? client.name : "No client set") + '</div></div></div>' +
+      "</div>";
+  }
+
+  function viewContentDetail(id) {
+    var p = projectById(id);
+    if (!p) return pageHead("Project not found", "") + emptyState("This project is gone", "It may have been deleted.", '<button class="btn" data-nav="#/content">Back to content</button>');
+    loadContentPosts(p.id);
+    var client = clientById(p.clientId);
+
+    var html = '<button class="back-link" data-nav="#/content">&larr; All content</button>';
+    html += '<div class="page-head"><div><div class="page-eyebrow">' + esc(client ? client.name : "No client set") + '</div><h1>' + esc(p.name) + "</h1></div>" +
+      '<div><button class="btn btn-sm" data-nav="#/projects/' + p.id + '">Open project</button></div></div>';
+    html += contentSectionHTML(p);
+    return html;
   }
 
   function contentCardHTML(post, projectId, stageIdx) {
