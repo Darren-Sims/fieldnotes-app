@@ -1447,21 +1447,22 @@
     if (!state.clients.length) {
       return html + emptyState("No clients yet", "Add a client before you create a project for them.", '<button class="btn btn-primary" data-open-modal="client">Add a client</button>');
     }
-    html += '<div class="card">' + state.clients.map(function (c) {
-      var projCount = state.projects.filter(function (p) { return p.clientId === c.id; }).length;
-      var accent = isValidHex(c.brandColor) ? c.brandColor : "";
-      var swatch = accent ? '<span class="client-swatch" style="background:' + accent + ';" aria-hidden="true"></span>' : "";
-      var siteBit = c.websiteUrl
-        ? ' &middot; <a class="client-link" href="' + esc(websiteHref(c.websiteUrl)) + '" target="_blank" rel="noopener noreferrer">' + esc(hostFromUrl(c.websiteUrl)) + "</a>"
-        : "";
-      return '<div class="list-row">' +
-        '<div class="list-row-main"><div class="list-row-title" style="display:flex;align-items:center;gap:7px;">' + swatch + esc(c.name) + '</div>' +
-        '<div class="list-row-sub">' + esc(c.company || "") + (c.company ? " &middot; " : "") + projCount + " project" + (projCount === 1 ? "" : "s") + siteBit + "</div></div>" +
-        '<button class="icon-btn" data-edit-client="' + c.id + '" title="Edit">Edit</button>' +
-        '<button class="icon-btn" data-delete-client="' + c.id + '" title="Delete">Delete</button>' +
-        "</div>";
-    }).join("") + "</div>";
+    html += '<div class="project-grid">' + state.clients.map(clientCardHTML).join("") + "</div>";
     return html;
+  }
+
+  function clientCardHTML(c) {
+    var projCount = state.projects.filter(function (p) { return p.clientId === c.id; }).length;
+    var accent = isValidHex(c.brandColor) ? c.brandColor : "";
+    var accentStyle = accent ? ' style="border-top:3px solid ' + accent + ';"' : "";
+    var swatch = accent ? '<span class="client-swatch" style="background:' + accent + ';" aria-hidden="true"></span>' : "";
+    return '<div class="card project-card" data-edit-client="' + c.id + '" tabindex="0" role="button" aria-label="Edit ' + esc(c.name) + '"' + accentStyle + '>' +
+      '<div class="project-card-top"><div><h3>' + esc(c.name) + '</h3>' +
+      '<div class="project-client">' + swatch + esc(c.company || "No company set") + '</div></div>' +
+      '<span class="pill pill-neutral">' + projCount + " project" + (projCount === 1 ? "" : "s") + "</span></div>" +
+      '<div class="project-meta-row"><span>' + (c.websiteUrl ? esc(hostFromUrl(c.websiteUrl)) : "No website") + '</span>' +
+      '<button type="button" class="icon-btn" data-delete-client="' + c.id + '" title="Delete client" aria-label="Delete ' + esc(c.name) + '" style="margin:-6px -8px -6px 0;">Delete</button></div>' +
+      "</div>";
   }
 
   /* ====================== VIEW: PROPOSALS ====================== */
@@ -1606,14 +1607,22 @@
         '<button class="btn btn-primary" data-new-contract="1">New contract</button>');
     }
     var sorted = state.contracts.slice().sort(function (a, b) { return b.updatedAt.localeCompare(a.updatedAt); });
-    html += '<div class="card">' + sorted.map(function (c) {
-      return '<div class="list-row proposal-list-row" data-nav="#/contracts/' + c.id + '" tabindex="0" role="button" aria-label="Open contract for ' + esc(c.projectName || "Untitled contract") + '">' +
-        '<div class="list-row-main"><div class="list-row-title">' + esc(c.projectName || "Untitled contract") + '</div>' +
-        '<div class="list-row-sub">' + esc(c.clientName || "No client named") + " &middot; updated " + fmtDateShort(c.updatedAt.slice(0, 10)) + "</div></div>" +
-        (c.price ? '<span class="pill pill-neutral tabular">' + money(c.price) + "</span>" : "") +
-        "</div>";
-    }).join("") + "</div>";
+    html += '<div class="project-grid">' + sorted.map(contractCardHTML).join("") + "</div>";
     return html;
+  }
+
+  function contractCardHTML(c) {
+    var accent = brandAccentFor(c);
+    var accentStyle = accent ? ' style="border-top:3px solid ' + accent + ';"' : "";
+    var swatch = accent ? '<span class="client-swatch" style="background:' + accent + ';" aria-hidden="true"></span>' : "";
+    return '<div class="card project-card" data-nav="#/contracts/' + c.id + '" tabindex="0" role="button" aria-label="Open contract for ' + esc(c.projectName || "Untitled contract") + '"' + accentStyle + '>' +
+      '<div class="project-card-top"><div><h3>' + esc(c.projectName || "Untitled contract") + '</h3>' +
+      '<div class="project-client">' + swatch + esc(c.clientName || "No client named") + '</div></div>' +
+      (c.price ? '<span class="pill pill-neutral tabular">' + money(c.price) + "</span>" : "") +
+      "</div>" +
+      '<div class="project-meta-row"><span>' + (c.shareToken ? "Shared" : "Not shared") + '</span>' +
+      '<span>Updated ' + fmtDateShort(c.updatedAt.slice(0, 10)) + "</span></div>" +
+      "</div>";
   }
 
   function blankContract(presets) {
@@ -2333,7 +2342,6 @@
     }
     if ((el = e.target.closest("[data-close-dialog]"))) { document.getElementById("appDialog").close(); return; }
 
-    if ((el = e.target.closest("[data-edit-client]"))) { openClientModal(clientById(el.getAttribute("data-edit-client"))); return; }
     if ((el = e.target.closest("[data-delete-client]"))) {
       var cid = el.getAttribute("data-delete-client");
       var used = state.projects.some(function (p) { return p.clientId === cid; });
@@ -2353,6 +2361,7 @@
       }
       return;
     }
+    if ((el = e.target.closest("[data-edit-client]"))) { openClientModal(clientById(el.getAttribute("data-edit-client"))); return; }
 
     if ((el = e.target.closest("[data-edit-project]"))) { openProjectModal(projectById(el.getAttribute("data-edit-project"))); return; }
     if ((el = e.target.closest("[data-delete-project]"))) {
@@ -3151,7 +3160,7 @@
         state.tasks.push({ id: uid("task"), projectId: projId, title: title, status: "todo", dueDate: "", createdAt: new Date().toISOString() });
       });
     }
-    if ((e.key === "Enter" || e.key === " ") && e.target.matches('[data-nav][role="button"]')) {
+    if ((e.key === "Enter" || e.key === " ") && e.target.matches('[role="button"][tabindex="0"]')) {
       e.preventDefault();
       e.target.click();
     }
