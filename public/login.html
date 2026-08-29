@@ -64,21 +64,14 @@
   body {
     margin: 0;
     min-height: 100vh;
-    background: var(--hero-wash, var(--ground));
+    background: var(--surface);
     color: var(--text-primary);
     font-family: var(--font-body);
     font-size: 15px;
     line-height: 1.5;
     -webkit-font-smoothing: antialiased;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 24px;
   }
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) body { background: var(--ground); }
-  }
-  h1 { font-family: var(--font-display); margin: 0; letter-spacing: -0.01em; }
+  h1, h2 { font-family: var(--font-display); margin: 0; letter-spacing: -0.01em; }
   p { margin: 0; }
   a { color: var(--accent); }
   button { font: inherit; color: inherit; }
@@ -93,39 +86,87 @@
     *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
   }
 
+  /* ---------- Split shell ---------- */
+  .login-shell { display: flex; min-height: 100vh; }
+
+  .promo-panel { flex: 1 1 50%; padding: 24px; display: flex; }
+  .promo-card {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+    border-radius: var(--radius-lg);
+    background: linear-gradient(155deg, #141b45 0%, #0d1230 100%);
+    color: #ffffff;
+    padding: 22px;
+    display: flex;
+    flex-direction: column;
+    min-height: 520px;
+  }
+  .promo-tag {
+    align-self: flex-start;
+    font-family: var(--font-display);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    background: rgba(255,255,255,0.12);
+    border: 1px solid rgba(255,255,255,0.18);
+    color: #ffffff;
+    padding: 6px 12px;
+    border-radius: var(--radius-pill);
+  }
+  .promo-image-slot {
+    flex: 1;
+    margin-top: 18px;
+    border: 1.5px dashed rgba(255,255,255,0.28);
+    border-radius: var(--radius-md);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: rgba(255,255,255,0.55);
+    font-size: 12.5px;
+    text-align: center;
+    padding: 20px;
+  }
+  .promo-copy { margin-top: 22px; }
+  .promo-eyebrow { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: rgba(255,255,255,0.6); margin-bottom: 8px; font-weight: 600; }
+  .promo-headline { font-size: 30px; line-height: 1.12; color: #ffffff; }
+  .promo-sub { color: rgba(255,255,255,0.72); font-size: 14px; margin-top: 10px; max-width: 34ch; }
+
+  @media (max-width: 900px) { .promo-panel { display: none; } }
+
+  .login-panel { flex: 1 1 50%; display: flex; align-items: center; justify-content: center; padding: 24px; }
+
   .card {
     width: 100%;
     max-width: 360px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    box-shadow: var(--surface-raised-shadow);
-    padding: 28px 26px 26px;
+    text-align: center;
   }
   .brand {
     display: flex;
+    flex-direction: column;
     align-items: center;
-    gap: 10px;
-    margin-bottom: 22px;
+    gap: 8px;
+    margin-bottom: 26px;
   }
   .brand-mark {
-    width: 32px; height: 32px;
+    width: 36px; height: 36px;
     display: grid; place-items: center;
     flex: none;
   }
   .brand-mark img, .brand-mark picture { width: 100%; height: 100%; object-fit: contain; display: block; }
-  .brand-name { font-family: var(--font-display); font-weight: 700; font-size: 18px; }
-  .brand-sub { font-size: 11px; color: var(--text-secondary); margin-top: -2px; }
+  .brand-name { font-family: var(--font-display); font-weight: 700; font-size: 17px; }
+  .brand-sub { font-size: 11.5px; color: var(--text-secondary); }
 
-  h1.title { font-size: 19px; margin-bottom: 4px; }
-  .lede { color: var(--text-secondary); font-size: 13.5px; margin-bottom: 20px; }
+  h1.title { font-size: 21px; margin-bottom: 6px; }
+  .lede { color: var(--text-secondary); font-size: 13.5px; margin-bottom: 24px; }
+  .field, .error, .foot-note { text-align: left; }
 
   .field { margin-bottom: 16px; }
   label { display: block; font-size: 12.5px; font-weight: 600; margin-bottom: 5px; color: var(--text-secondary); }
   input[type="password"] {
     width: 100%;
-    padding: 10px 11px;
-    border-radius: var(--radius-sm);
+    padding: 12px 13px;
+    border-radius: var(--radius-md);
     border: 1px solid var(--border-interactive);
     background: var(--surface);
     color: var(--text-primary);
@@ -163,34 +204,50 @@
 </style>
 </head>
 <body>
-  <main class="card">
-    <div class="brand">
-      <div class="brand-mark" aria-hidden="true"><picture><source srcset="/logo-dark.png" media="(prefers-color-scheme: dark)"><img src="/logo.png" alt=""></picture></div>
-      <div>
-        <div class="brand-name">Darren Sims Projects</div>
-        <div class="brand-sub">Studio ops</div>
+  <div class="login-shell">
+    <aside class="promo-panel" aria-hidden="true">
+      <div class="promo-card">
+        <span class="promo-tag">FIELDNOTES</span>
+        <div class="promo-image-slot">Add an image here</div>
+        <div class="promo-copy">
+          <div class="promo-eyebrow">Darren Sims Projects</div>
+          <h2 class="promo-headline">Every client, one place.</h2>
+          <p class="promo-sub">Projects, contracts, content and files, tracked without the spreadsheet.</p>
+        </div>
       </div>
-    </div>
+    </aside>
 
-    <h1 class="title">Log in</h1>
-    <p class="lede">Enter the password to open your tracker.</p>
+    <main class="login-panel">
+      <div class="card">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true"><picture><source srcset="/logo-dark.png" media="(prefers-color-scheme: dark)"><img src="/logo.png" alt=""></picture></div>
+          <div>
+            <div class="brand-name">Darren Sims Projects</div>
+            <div class="brand-sub">Studio ops</div>
+          </div>
+        </div>
 
-    <div class="error" id="loginError" role="alert" data-show="0">
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.4"/><path d="M8 4.5V8.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="8" cy="11" r="0.9" fill="currentColor"/></svg>
-      <span id="loginErrorText">Incorrect password. Try again.</span>
-    </div>
+        <h1 class="title">Log in to your account</h1>
+        <p class="lede">Enter the password to open your tracker.</p>
 
-    <form id="loginForm" novalidate>
-      <div class="field">
-        <label for="password">Password</label>
-        <input type="password" id="password" name="password" autocomplete="current-password" required autofocus>
+        <div class="error" id="loginError" role="alert" data-show="0">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.4"/><path d="M8 4.5V8.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="8" cy="11" r="0.9" fill="currentColor"/></svg>
+          <span id="loginErrorText">Incorrect password. Try again.</span>
+        </div>
+
+        <form id="loginForm" novalidate>
+          <div class="field">
+            <label for="password">Password</label>
+            <input type="password" id="password" name="password" autocomplete="current-password" required autofocus>
+          </div>
+          <button type="submit" class="btn-primary" id="loginBtn">Log in</button>
+        </form>
+
+        <p class="foot-note"><a href="/forgot-password">Forgot password?</a></p>
+        <p class="foot-note">Private tool — access is limited to people with the password.</p>
       </div>
-      <button type="submit" class="btn-primary" id="loginBtn">Log in</button>
-    </form>
-
-    <p class="foot-note"><a href="/forgot-password">Forgot password?</a></p>
-    <p class="foot-note">Private tool — access is limited to people with the password.</p>
-  </main>
+    </main>
+  </div>
 
   <script>
     (function () {
