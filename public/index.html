@@ -989,10 +989,17 @@
 
   function taskRowHTML(t) {
     var p = projectById(t.projectId);
+    var client = p ? clientById(p.clientId) : null;
+    var accent = client && isValidHex(client.brandColor) ? client.brandColor : "";
+    var swatch = accent ? '<span class="client-swatch" style="background:' + accent + ';" aria-hidden="true"></span> ' : "";
+    var subParts = [];
+    if (client) subParts.push('<button type="button" class="row-link-btn" data-nav="#/clients/' + client.id + '">' + esc(client.name) + "</button>");
+    if (p) subParts.push('<button type="button" class="row-link-btn" data-nav="#/projects/' + p.id + '">' + esc(p.name) + "</button>");
+    var sub = subParts.length ? '<div class="list-row-sub">' + swatch + subParts.join(' <span aria-hidden="true">&middot;</span> ') + "</div>" : "";
     return '<div class="list-row">' +
       '<div class="list-row-main">' +
       '<div class="list-row-title"><button type="button" class="task-card-title" data-open-task="' + t.id + '">' + esc(t.title) + "</button></div>" +
-      (p ? '<div class="list-row-sub"><button type="button" class="row-link-btn" data-nav="#/projects/' + p.id + '">' + esc(p.name) + "</button></div>" : "") +
+      sub +
       "</div>" +
       (t.dueDate ? '<span class="tabular task-due' + (isOverdue(t.dueDate) ? " overdue" : "") + '">' + fmtDateShort(t.dueDate) + "</span>" : "") +
       "</div>";
