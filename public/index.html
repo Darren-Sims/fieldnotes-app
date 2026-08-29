@@ -281,6 +281,8 @@
   .client-swatch { display: inline-block; width: 9px; height: 9px; border-radius: 50%; border: 1px solid var(--border); flex: none; }
   .client-link { color: inherit; text-decoration: none; }
   .client-link:hover { color: var(--accent); text-decoration: underline; }
+  .row-link-btn { background: none; border: none; padding: 0; font: inherit; color: inherit; cursor: pointer; }
+  .row-link-btn:hover { color: var(--accent); text-decoration: underline; }
 
   /* ---------- Cards / lists ---------- */
   .card {
@@ -293,6 +295,9 @@
   .stat-tile { padding: 16px 18px; }
   .stat-num { font-family: var(--font-mono); font-size: 26px; font-weight: 500; font-variant-numeric: tabular-nums; }
   .stat-label { font-size: 12.5px; color: var(--text-secondary); margin-top: 2px; }
+  .stat-tile-clickable { cursor: pointer; }
+  .stat-tile-clickable:hover { border-color: var(--border-interactive); }
+  .stat-badge { display: inline-block; margin-top: 8px; font-size: 11px; font-weight: 700; color: var(--warning-text); background: var(--warning-bg); padding: 2px 9px; border-radius: 999px; }
 
   .section-head { display: flex; align-items: baseline; justify-content: space-between; margin: 30px 0 12px; }
   .section-head h2 { font-size: 15px; text-transform: uppercase; letter-spacing: 0.05em; }
@@ -814,6 +819,7 @@
     else if (r.name === "proposals") view = viewProposals();
     else if (r.name === "contracts" && r.id) view = viewContractEditor(r.id);
     else if (r.name === "contracts") view = viewContracts();
+    else if (r.name === "tasks") view = viewTasks();
     else if (r.name === "marketing") view = viewMarketing();
     else view = viewOverview();
 
@@ -890,10 +896,11 @@
     var exploringProjects = state.projects.filter(function (p) { return p.status === "working_it_out"; });
     var openTasks = state.tasks.filter(function (t) { return t.status !== "done"; });
     var overdueTasks = openTasks.filter(function (t) { return isOverdue(t.dueDate); });
-    var dueSoon = openTasks
-      .filter(function (t) { return t.dueDate; })
-      .sort(function (a, b) { return a.dueDate < b.dueDate ? -1 : 1; })
-      .slice(0, 6);
+    var dueSoonTasks = openTasks.filter(function (t) {
+      if (!t.dueDate || isOverdue(t.dueDate)) return false;
+      var d = daysUntil(t.dueDate);
+      return d !== null && d <= 7;
+    });
 
     if (!state.clients.length) {
       return pageHead("Overview", "A running view of every project, so nothing depends on memory.") +
@@ -918,23 +925,13 @@
     html += '<div class="stat-row">' +
       statTile(state.projects.length, "Projects") +
       statTile(activeProjects.length, "Active") +
-      statTile(openTasks.length, "Open tasks") +
+      statTile(openTasks.length, "Open tasks", null, {
+        nav: "#/tasks",
+        ariaLabel: "Open tasks — view all",
+        badge: dueSoonTasks.length ? dueSoonTasks.length + " due soon" : ""
+      }) +
       statTile(overdueTasks.length, "Overdue", overdueTasks.length ? "danger" : null) +
       "</div>";
-
-    html += '<div class="section-head"><h2>Due soon</h2></div>';
-    if (!dueSoon.length) {
-      html += '<p class="page-sub">Nothing with a due date on the board right now.</p>';
-    } else {
-      html += '<div class="card">' + dueSoon.map(function (t) {
-        var p = projectById(t.projectId);
-        return '<div class="list-row">' +
-          '<div class="list-row-main"><div class="list-row-title">' + esc(t.title) + '</div>' +
-          '<div class="list-row-sub">' + esc(p ? p.name : "") + '</div></div>' +
-          '<span class="tabular task-due' + (isOverdue(t.dueDate) ? " overdue" : "") + '">' + fmtDateShort(t.dueDate) + '</span>' +
-          '</div>';
-      }).join("") + "</div>";
-    }
 
     if (exploringProjects.length) {
       html += '<div class="section-head"><h2>Working it out</h2></div>';
@@ -948,8 +945,65 @@
     return html;
   }
 
-  function statTile(num, label, tone) {
-    return '<div class="card stat-tile"><div class="stat-num"' + (tone === "danger" && num ? ' style="color:var(--danger-text)"' : "") + '>' + num + '</div><div class="stat-label">' + esc(label) + "</div></div>";
+  /* ====================== VIEW: TASKS ====================== */
+
+  function viewTasks() {
+    var html = '<button class="back-link" data-nav="#/overview">&larr; Overview</button>';
+    html += pageHead("Tasks", "Every open task across your projects.");
+
+    var openTasks = state.tasks.filter(function (t) { return t.status !== "done"; });
+    if (!openTasks.length) {
+      return html + emptyState("Nothing open", "Every task across your projects is done, or you haven't added any yet.", '<button class="btn" data-nav="#/projects">Go to projects</button>');
+    }
+
+    var overdue = openTasks.filter(function (t) { return isOverdue(t.dueDate); });
+    var dueSoon = openTasks.filter(function (t) {
+      if (!t.dueDate || isOverdue(t.dueDate)) return false;
+      var d = daysUntil(t.dueDate);
+      return d !== null && d <= 7;
+    });
+    var handled = {};
+    overdue.concat(dueSoon).forEach(function (t) { handled[t.id] = true; });
+    var rest = openTasks.filter(function (t) { return !handled[t.id]; });
+
+    function byDueDate(list) {
+      return list.slice().sort(function (a, b) {
+        if (a.dueDate && b.dueDate) return a.dueDate < b.dueDate ? -1 : a.dueDate > b.dueDate ? 1 : 0;
+        if (a.dueDate) return -1;
+        if (b.dueDate) return 1;
+        return (a.createdAt || "").localeCompare(b.createdAt || "");
+      });
+    }
+
+    function section(title, list) {
+      if (!list.length) return "";
+      return '<div class="section-head"><h2>' + esc(title) + " (" + list.length + ")</h2></div>" +
+        '<div class="card">' + byDueDate(list).map(taskRowHTML).join("") + "</div>";
+    }
+
+    html += section("Overdue", overdue);
+    html += section("Due soon", dueSoon);
+    html += section("Everything else", rest);
+    return html;
+  }
+
+  function taskRowHTML(t) {
+    var p = projectById(t.projectId);
+    return '<div class="list-row">' +
+      '<div class="list-row-main">' +
+      '<div class="list-row-title"><button type="button" class="task-card-title" data-open-task="' + t.id + '">' + esc(t.title) + "</button></div>" +
+      (p ? '<div class="list-row-sub"><button type="button" class="row-link-btn" data-nav="#/projects/' + p.id + '">' + esc(p.name) + "</button></div>" : "") +
+      "</div>" +
+      (t.dueDate ? '<span class="tabular task-due' + (isOverdue(t.dueDate) ? " overdue" : "") + '">' + fmtDateShort(t.dueDate) + "</span>" : "") +
+      "</div>";
+  }
+
+  function statTile(num, label, tone, opts) {
+    opts = opts || {};
+    var badge = opts.badge ? '<div class="stat-badge">' + esc(opts.badge) + "</div>" : "";
+    var clickable = !!opts.nav;
+    var attrs = clickable ? ' data-nav="' + opts.nav + '" tabindex="0" role="button" aria-label="' + esc(opts.ariaLabel || label) + '"' : "";
+    return '<div class="card stat-tile' + (clickable ? " stat-tile-clickable" : "") + '"' + attrs + '><div class="stat-num"' + (tone === "danger" && num ? ' style="color:var(--danger-text)"' : "") + '>' + num + '</div><div class="stat-label">' + esc(label) + "</div>" + badge + "</div>";
   }
 
   /* ---- Win new work (shown on Overview when there are no active projects) ---- */
