@@ -363,7 +363,7 @@
   .panel-head h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--accent-strong); }
   .panel-count { font-family: var(--font-mono); font-size: 11.5px; color: var(--accent-strong); background: var(--surface); border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px; }
   .panel-body { padding: 16px 18px; }
-  .panel-body .board,
+  .panel-body .checklist,
   .panel-body .content-board { margin-top: 0; }
   @media (max-width: 640px) { .panel-grid { grid-template-columns: 1fr; } }
 
@@ -380,27 +380,48 @@
   }
   .task-group-add-row .task-add-input::placeholder { color: var(--text-secondary); }
 
-  .board { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 22px; align-items: start; }
-  .board-col { background: var(--surface-sunken); border-radius: var(--radius-lg); padding: 12px; min-height: 60px; }
-  .board-col-head { display: flex; align-items: center; justify-content: space-between; padding: 2px 4px 10px; }
-  .board-col-head h3 { font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-secondary); }
   .board-count { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-secondary); }
-  .task-card {
-    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md);
-    padding: 10px 11px; margin-bottom: 8px; font-size: 13.5px; cursor: pointer;
-  }
-  .task-card:hover { border-color: var(--border-interactive); }
-  .task-card:last-child { margin-bottom: 0; }
+  .task-due { font-size: 11px; color: var(--text-secondary); font-family: var(--font-mono); }
+  .task-due.overdue { color: var(--danger-text); font-weight: 600; }
+  .task-add-row { padding: 4px; }
   .task-card-title {
     display: block; width: 100%; text-align: left;
     font-weight: 500; line-height: 1.35; font-size: inherit; color: inherit;
     background: none; border: none; padding: 0; margin: 0; cursor: pointer;
   }
   .task-card-title:hover { color: var(--accent); }
-  .task-card-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; }
-  .task-due { font-size: 11px; color: var(--text-secondary); font-family: var(--font-mono); }
-  .task-due.overdue { color: var(--danger-text); font-weight: 600; }
-  .task-add-row { padding: 4px; }
+
+  .checklist { margin-top: 18px; border-top: 1px solid var(--border); }
+  .task-group .checklist { margin-top: 8px; }
+  .checklist-row {
+    display: flex; align-items: flex-start; gap: 10px;
+    padding: 10px 2px; border-bottom: 1px solid var(--border);
+  }
+  .checklist-row:last-child { border-bottom: none; }
+  .checklist-row:hover { background: var(--surface-sunken); }
+  .checklist-checkbox {
+    flex: none; width: 18px; height: 18px; margin-top: 1px;
+    border: 1.5px solid var(--border-interactive); border-radius: 5px;
+    background: var(--surface); cursor: pointer; padding: 0; position: relative;
+  }
+  .checklist-checkbox.is-checked { background: var(--success-text); border-color: var(--success-text); }
+  .checklist-checkbox.is-checked::after {
+    content: ""; position: absolute; left: 5px; top: 1px; width: 4px; height: 8px;
+    border: solid var(--surface); border-width: 0 2px 2px 0; transform: rotate(45deg);
+  }
+  .checklist-main { flex: 1; min-width: 0; }
+  .checklist-title-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .checklist-title {
+    font-size: 14px; font-weight: 500; color: var(--text-primary); line-height: 1.35;
+    background: none; border: none; padding: 0; text-align: left; cursor: pointer;
+  }
+  .checklist-title:hover { color: var(--accent); }
+  .checklist-row.is-done .checklist-title { color: var(--text-secondary); text-decoration: line-through; }
+  .checklist-sub { font-size: 12.5px; color: var(--text-secondary); margin-top: 2px; display: flex; align-items: center; gap: 5px; }
+  .status-tag { font-size: 10.5px; font-weight: 700; letter-spacing: 0.02em; border-radius: 999px; padding: 2px 8px; border: none; cursor: pointer; flex: none; }
+  .status-tag-doing { background: var(--warning-bg); color: var(--warning-text); }
+  .status-tag-todo { background: none; color: var(--text-secondary); border: 1px dashed var(--border); }
+  .checklist-row .task-due { flex: none; margin-top: 2px; }
   .task-add-input {
     width: 100%; border: 1px dashed var(--border-interactive); background: none;
     border-radius: var(--radius-md); padding: 8px 9px; font-size: 13px; color: var(--text-primary);
@@ -517,7 +538,6 @@
     .nav-group { flex-direction: row; flex: none; }
     .rail-foot { margin-top: 0; padding: 8px 4px; flex-direction: row; align-items: center; flex: none; white-space: nowrap; }
     .main { padding: 22px 18px 60px; }
-    .board { grid-template-columns: 1fr; }
     .stat-row { grid-template-columns: repeat(2, 1fr); }
   }
 </style>
@@ -978,31 +998,15 @@
     function section(title, list) {
       if (!list.length) return "";
       return '<div class="section-head"><h2>' + esc(title) + " (" + list.length + ")</h2></div>" +
-        '<div class="card">' + byDueDate(list).map(taskRowHTML).join("") + "</div>";
+        '<div class="card"><div class="checklist" style="margin-top:0;border-top:none;">' +
+        byDueDate(list).map(function (t) { return taskChecklistRowHTML(t, { showContext: true }); }).join("") +
+        "</div></div>";
     }
 
     html += section("Overdue", overdue);
     html += section("Due soon", dueSoon);
     html += section("Everything else", rest);
     return html;
-  }
-
-  function taskRowHTML(t) {
-    var p = projectById(t.projectId);
-    var client = p ? clientById(p.clientId) : null;
-    var accent = client && isValidHex(client.brandColor) ? client.brandColor : "";
-    var swatch = accent ? '<span class="client-swatch" style="background:' + accent + ';" aria-hidden="true"></span> ' : "";
-    var subParts = [];
-    if (client) subParts.push('<button type="button" class="row-link-btn" data-nav="#/clients/' + client.id + '">' + esc(client.name) + "</button>");
-    if (p) subParts.push('<button type="button" class="row-link-btn" data-nav="#/projects/' + p.id + '">' + esc(p.name) + "</button>");
-    var sub = subParts.length ? '<div class="list-row-sub">' + swatch + subParts.join(' <span aria-hidden="true">&middot;</span> ') + "</div>" : "";
-    return '<div class="list-row">' +
-      '<div class="list-row-main">' +
-      '<div class="list-row-title"><button type="button" class="task-card-title" data-open-task="' + t.id + '">' + esc(t.title) + "</button></div>" +
-      sub +
-      "</div>" +
-      (t.dueDate ? '<span class="tabular task-due' + (isOverdue(t.dueDate) ? " overdue" : "") + '">' + fmtDateShort(t.dueDate) + "</span>" : "") +
-      "</div>";
   }
 
   function statTile(num, label, tone, opts) {
@@ -1507,15 +1511,14 @@
     return html;
   }
 
-  function miniBoardHTML(colTasks, groupId, projectId) {
-    return '<div class="board">' + TASK_COLS.map(function (col) {
-      var inCol = colTasks.filter(function (t) { return t.status === col.key; });
-      return '<div class="board-col" data-col="' + col.key + '">' +
-        '<div class="board-col-head"><h3>' + col.label + '</h3><span class="board-count">' + inCol.length + "</span></div>" +
-        inCol.map(function (t) { return taskCardHTML(t); }).join("") +
-        (col.key === "todo" ? '<div class="task-add-row"><input class="task-add-input" type="text" placeholder="Add a task and press enter" data-new-task="' + projectId + '" data-task-group="' + groupId + '"></div>' : "") +
-        "</div>";
-    }).join("") + "</div>";
+  function taskChecklistHTML(tasksList, groupId, projectId) {
+    var open = tasksList.filter(function (t) { return t.status !== "done"; });
+    var done = tasksList.filter(function (t) { return t.status === "done"; });
+    return '<div class="checklist">' +
+      open.map(function (t) { return taskChecklistRowHTML(t); }).join("") +
+      '<div class="task-add-row"><input class="task-add-input" type="text" placeholder="Add a task and press enter" data-new-task="' + projectId + '" data-task-group="' + groupId + '"></div>' +
+      done.map(function (t) { return taskChecklistRowHTML(t); }).join("") +
+      "</div>";
   }
 
   function taskGroupsSectionHTML(p, tasks) {
@@ -1527,9 +1530,9 @@
     });
     var ungrouped = byGroup[""] || [];
 
-    // No named Project Tasks yet: keep the plain single board, unchanged, until Darren opts in.
+    // No named Project Tasks yet: keep the plain single checklist, unchanged, until Darren opts in.
     if (!groups.length) {
-      return miniBoardHTML(ungrouped, "", p.id) +
+      return taskChecklistHTML(ungrouped, "", p.id) +
         '<div class="task-group-add-row"><input class="task-add-input" type="text" placeholder="Add a Project Task, e.g. Logo, Website" data-new-taskgroup="' + p.id + '"></div>';
     }
 
@@ -1537,7 +1540,7 @@
     if (ungrouped.length) {
       html += '<div class="task-group"><div class="task-group-head"><h3>General</h3>' +
         '<span class="board-count">' + ungrouped.filter(function (t) { return t.status === "done"; }).length + "/" + ungrouped.length + "</span></div>" +
-        miniBoardHTML(ungrouped, "", p.id) + "</div>";
+        taskChecklistHTML(ungrouped, "", p.id) + "</div>";
     }
     html += groups.map(function (g) {
       var groupTasks = byGroup[g.id] || [];
@@ -1548,22 +1551,41 @@
         '<button type="button" class="icon-btn" data-rename-taskgroup="' + g.id + '" title="Rename ' + esc(g.name) + '">Rename</button>' +
         '<button type="button" class="icon-btn" data-delete-taskgroup="' + g.id + '" title="Delete ' + esc(g.name) + '">Delete</button>' +
         "</span></div>" +
-        miniBoardHTML(groupTasks, g.id, p.id) + "</div>";
+        taskChecklistHTML(groupTasks, g.id, p.id) + "</div>";
     }).join("");
 
     html += '<div class="task-group-add-row"><input class="task-add-input" type="text" placeholder="Add another Project Task" data-new-taskgroup="' + p.id + '"></div>';
     return html;
   }
 
-  function taskCardHTML(t) {
-    return '<div class="task-card">' +
-      '<button type="button" class="task-card-title" data-open-task="' + t.id + '">' + esc(t.title) + "</button>" +
-      '<div class="task-card-foot">' +
-      '<span class="task-due' + (t.status !== "done" && isOverdue(t.dueDate) ? " overdue" : "") + '">' + (t.dueDate ? fmtDateShort(t.dueDate) : "") + "</span>" +
-      '<span style="display:flex;gap:2px;">' +
-      (t.status !== "todo" ? '<button class="icon-btn" title="Move back" data-task-move="' + t.id + '" data-dir="-1">&larr;</button>' : "") +
-      (t.status !== "done" ? '<button class="icon-btn" title="Move forward" data-task-move="' + t.id + '" data-dir="1">&rarr;</button>' : "") +
-      "</span></div></div>";
+  function taskChecklistRowHTML(t, opts) {
+    opts = opts || {};
+    var isDone = t.status === "done";
+    var tag = "";
+    if (!isDone) {
+      tag = t.status === "doing"
+        ? '<button type="button" class="status-tag status-tag-doing" data-cycle-task-status="' + t.id + '" title="Mark as to do">Doing</button>'
+        : '<button type="button" class="status-tag status-tag-todo" data-cycle-task-status="' + t.id + '" title="Mark as doing">To do</button>';
+    }
+    var sub = "";
+    if (opts.showContext) {
+      var p = projectById(t.projectId);
+      var client = p ? clientById(p.clientId) : null;
+      var accent = client && isValidHex(client.brandColor) ? client.brandColor : "";
+      var swatch = accent ? '<span class="client-swatch" style="background:' + accent + ';" aria-hidden="true"></span> ' : "";
+      var subParts = [];
+      if (client) subParts.push('<button type="button" class="row-link-btn" data-nav="#/clients/' + client.id + '">' + esc(client.name) + "</button>");
+      if (p) subParts.push('<button type="button" class="row-link-btn" data-nav="#/projects/' + p.id + '">' + esc(p.name) + "</button>");
+      if (subParts.length) sub = '<div class="checklist-sub">' + swatch + subParts.join(' <span aria-hidden="true">&middot;</span> ') + "</div>";
+    }
+    return '<div class="checklist-row' + (isDone ? " is-done" : "") + '">' +
+      '<button type="button" class="checklist-checkbox' + (isDone ? " is-checked" : "") + '" data-toggle-task="' + t.id + '" aria-pressed="' + (isDone ? "true" : "false") + '" aria-label="Mark ' + (isDone ? "not done" : "done") + '"></button>' +
+      '<div class="checklist-main">' +
+      '<div class="checklist-title-row"><button type="button" class="checklist-title" data-open-task="' + t.id + '">' + esc(t.title) + "</button>" + tag + "</div>" +
+      sub +
+      "</div>" +
+      (t.dueDate ? '<span class="tabular task-due' + (!isDone && isOverdue(t.dueDate) ? " overdue" : "") + '">' + fmtDateShort(t.dueDate) + "</span>" : "") +
+      "</div>";
   }
 
   /* ---- Notes (general + structured meeting notes) ---- */
@@ -2597,17 +2619,24 @@
       return;
     }
 
-    if ((el = e.target.closest("[data-task-move]"))) {
-      var tid = el.getAttribute("data-task-move");
-      var dir = Number(el.getAttribute("data-dir"));
-      var task = state.tasks.find(function (t) { return t.id === tid; });
-      var idx = TASK_COLS.findIndex(function (c) { return c.key === task.status; });
-      var next = TASK_COLS[idx + dir];
-      if (next) {
+    if ((el = e.target.closest("[data-toggle-task]"))) {
+      var toggleTid = el.getAttribute("data-toggle-task");
+      var toggleTask = state.tasks.find(function (t) { return t.id === toggleTid; });
+      if (toggleTask) {
+        var wasDone = toggleTask.status === "done";
         mutate(function () {
-          task.status = next.key;
-          if (next.key === "done") task.completedAt = new Date().toISOString();
+          toggleTask.status = wasDone ? "todo" : "done";
+          if (!wasDone) toggleTask.completedAt = new Date().toISOString();
         });
+      }
+      return;
+    }
+
+    if ((el = e.target.closest("[data-cycle-task-status]"))) {
+      var cycleTid = el.getAttribute("data-cycle-task-status");
+      var cycleTask = state.tasks.find(function (t) { return t.id === cycleTid; });
+      if (cycleTask && cycleTask.status !== "done") {
+        mutate(function () { cycleTask.status = cycleTask.status === "doing" ? "todo" : "doing"; });
       }
       return;
     }
