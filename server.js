@@ -6,6 +6,7 @@ var crypto = require("crypto");
 var path = require("path");
 var multer = require("multer");
 var PDFDocument = require("pdfkit");
+var QRCode = require("qrcode");
 var { Pool } = require("pg");
 
 var MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024; // 10MB
@@ -67,6 +68,160 @@ function getCurrentPasswordHash() {
   return pool.query("SELECT password_hash FROM app_auth WHERE id = 1").then(function (result) {
     return result.rows[0] ? result.rows[0].password_hash : null;
   });
+}
+
+function getAuthRow() {
+  return pool.query("SELECT password_hash, totp_secret, totp_enabled, backup_codes FROM app_auth WHERE id = 1")
+    .then(function (result) {
+      return result.rows[0] || null;
+    });
+}
+
+/* ====================== TWO-FACTOR AUTH (TOTP) ====================== */
+/* Standard RFC 6238 TOTP — the same scheme Google Authenticator, Authy and
+   1Password all speak. No SMS, no email, no third-party service: the app
+   and the authenticator both derive the same 6-digit code from a shared
+   secret and the current time, so there's nothing to deliver and nothing
+   that can be intercepted in transit. Implemented directly against
+   RFC 4226 / RFC 6238 with Node's built-in crypto (verified against the
+   official test vectors from both RFCs) rather than an extra dependency. */
+
+var TOTP_STEP_SECONDS = 30;
+var TOTP_DIGITS = 6;
+var TOTP_WINDOW = 1; // tolerate ±1 step (30s) of clock drift
+
+function base32Encode(buf) {
+  var alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  var bits = 0, value = 0, output = "";
+  for (var i = 0; i < buf.length; i++) {
+    value = (value << 8) | buf[i];
+    bits += 8;
+    while (bits >= 5) {
+      output += alphabet[(value >>> (bits - 5)) & 31];
+      bits -= 5;
+    }
+  }
+  if (bits > 0) output += alphabet[(value << (5 - bits)) & 31];
+  return output;
+}
+
+function base32Decode(str) {
+  var alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  str = String(str || "").toUpperCase().replace(/[^A-Z2-7]/g, "");
+  var bits = 0, value = 0;
+  var out = [];
+  for (var i = 0; i < str.length; i++) {
+    var idx = alphabet.indexOf(str[i]);
+    if (idx === -1) continue;
+    value = (value << 5) | idx;
+    bits += 5;
+    if (bits >= 8) {
+      out.push((value >>> (bits - 8)) & 255);
+      bits -= 8;
+    }
+  }
+  return Buffer.from(out);
+}
+
+function generateTotpSecret() {
+  return base32Encode(crypto.randomBytes(20));
+}
+
+function hotp(secretBuf, counter) {
+  var buf = Buffer.alloc(8);
+  var high = Math.floor(counter / 0x100000000);
+  var low = counter >>> 0;
+  buf.writeUInt32BE(high, 0);
+  buf.writeUInt32BE(low, 4);
+  var hmac = crypto.createHmac("sha1", secretBuf).update(buf).digest();
+  var offset = hmac[hmac.length - 1] & 0xf;
+  var binCode = ((hmac[offset] & 0x7f) << 24) |
+    ((hmac[offset + 1] & 0xff) << 16) |
+    ((hmac[offset + 2] & 0xff) << 8) |
+    (hmac[offset + 3] & 0xff);
+  var otp = binCode % Math.pow(10, TOTP_DIGITS);
+  return String(otp).padStart(TOTP_DIGITS, "0");
+}
+
+function totpAt(secretBase32, timeSeconds) {
+  var counter = Math.floor(timeSeconds / TOTP_STEP_SECONDS);
+  return hotp(base32Decode(secretBase32), counter);
+}
+
+function verifyTotp(secretBase32, code) {
+  code = String(code || "").trim().replace(/\s+/g, "");
+  if (!/^\d{6}$/.test(code)) return false;
+  var now = Math.floor(Date.now() / 1000);
+  for (var w = -TOTP_WINDOW; w <= TOTP_WINDOW; w++) {
+    var candidate = totpAt(secretBase32, now + w * TOTP_STEP_SECONDS);
+    var expected = Buffer.from(candidate);
+    var actual = Buffer.from(code);
+    if (expected.length === actual.length && crypto.timingSafeEqual(expected, actual)) return true;
+  }
+  return false;
+}
+
+function totpAuthUrl(secretBase32, label, issuer) {
+  var enc = encodeURIComponent;
+  return "otpauth://totp/" + enc(issuer) + ":" + enc(label) +
+    "?secret=" + secretBase32 + "&issuer=" + enc(issuer) +
+    "&algorithm=SHA1&digits=" + TOTP_DIGITS + "&period=" + TOTP_STEP_SECONDS;
+}
+
+/* ---- Backup codes: one-time-use fallback if the authenticator is lost.
+   Stored hashed with the same scrypt scheme as the password, so a database
+   leak alone doesn't hand over working codes. Format XXXX-XXXX, drawn from
+   an alphabet without ambiguous characters (no 0/O/1/I). ---- */
+
+var BACKUP_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+function generateBackupCode() {
+  var bytes = crypto.randomBytes(8);
+  var out = "";
+  for (var i = 0; i < 8; i++) out += BACKUP_CODE_ALPHABET[bytes[i] % BACKUP_CODE_ALPHABET.length];
+  return out.slice(0, 4) + "-" + out.slice(4);
+}
+function generateBackupCodes(count) {
+  var codes = [];
+  for (var i = 0; i < count; i++) codes.push(generateBackupCode());
+  return codes;
+}
+function normalizeBackupCode(code) {
+  return String(code || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+/* ---- Pending-2FA cookie: set once the password checks out but before the
+   code is verified. Stateless like the main auth cookie (an HMAC, no
+   server-side session store) but short-lived and scoped to its own
+   purpose — it cannot be used to reach anything past /api/login/verify-2fa. ---- */
+
+var PENDING_2FA_COOKIE = "fn_pending2fa";
+var PENDING_2FA_TTL_MS = 5 * 60 * 1000;
+var PENDING_2FA_COOKIE_OPTS = {
+  httpOnly: true,
+  secure: IS_PROD,
+  sameSite: "lax",
+  maxAge: PENDING_2FA_TTL_MS
+};
+
+function signPending2fa(passwordHash) {
+  var expires = Date.now() + PENDING_2FA_TTL_MS;
+  var payload = passwordHash + ":" + expires;
+  var sig = crypto.createHmac("sha256", SESSION_SECRET).update(payload).digest("hex");
+  return expires + "." + sig;
+}
+
+function verifyPending2fa(token, passwordHash) {
+  if (!token || !passwordHash) return false;
+  var parts = String(token).split(".");
+  if (parts.length !== 2) return false;
+  var expires = Number(parts[0]);
+  if (!expires || Date.now() > expires) return false;
+  var payload = passwordHash + ":" + expires;
+  var expectedSig = crypto.createHmac("sha256", SESSION_SECRET).update(payload).digest("hex");
+  var expectedBuf = Buffer.from(expectedSig);
+  var actualBuf = Buffer.from(parts[1] || "");
+  if (expectedBuf.length !== actualBuf.length) return false;
+  return crypto.timingSafeEqual(expectedBuf, actualBuf);
 }
 
 /* ====================== SESSION COOKIE ====================== */
@@ -164,6 +319,16 @@ function ensureSchema() {
       return pool.query(
         "INSERT INTO app_auth (id, password_hash) VALUES (1, $1) ON CONFLICT (id) DO NOTHING",
         [hashPassword(APP_PASSWORD)]
+      );
+    })
+    .then(function () {
+      // Two-factor auth fields on the same single-row auth table. totp_secret
+      // is only set once setup starts, and totp_enabled only flips to true
+      // once the first code is confirmed — see /api/2fa/setup and /confirm.
+      return pool.query(
+        "ALTER TABLE app_auth ADD COLUMN IF NOT EXISTS totp_secret TEXT; " +
+        "ALTER TABLE app_auth ADD COLUMN IF NOT EXISTS totp_enabled BOOLEAN NOT NULL DEFAULT false; " +
+        "ALTER TABLE app_auth ADD COLUMN IF NOT EXISTS backup_codes JSONB NOT NULL DEFAULT '[]'::jsonb"
       );
     })
     .then(function () {
@@ -482,13 +647,17 @@ app.get("/login", function (req, res) {
 app.post("/api/login", function (req, res) {
   var password = (req.body && req.body.password) || "";
   if (!password) return res.status(401).json({ ok: false, error: "Incorrect password" });
-  getCurrentPasswordHash()
-    .then(function (hash) {
-      if (hash && verifyPassword(password, hash)) {
-        res.cookie(COOKIE_NAME, signToken(hash), COOKIE_OPTS);
-        return res.json({ ok: true });
+  getAuthRow()
+    .then(function (row) {
+      if (!row || !verifyPassword(password, row.password_hash)) {
+        return res.status(401).json({ ok: false, error: "Incorrect password" });
       }
-      return res.status(401).json({ ok: false, error: "Incorrect password" });
+      if (row.totp_enabled) {
+        res.cookie(PENDING_2FA_COOKIE, signPending2fa(row.password_hash), PENDING_2FA_COOKIE_OPTS);
+        return res.json({ ok: true, needs2fa: true });
+      }
+      res.cookie(COOKIE_NAME, signToken(row.password_hash), COOKIE_OPTS);
+      return res.json({ ok: true });
     })
     .catch(function (err) {
       console.error("POST /api/login failed:", err);
@@ -496,8 +665,63 @@ app.post("/api/login", function (req, res) {
     });
 });
 
+app.post("/api/login/verify-2fa", function (req, res) {
+  var key = "2fa:" + (req.ip || "unknown");
+  if (isRateLimited(key)) {
+    return res.status(429).json({ ok: false, error: "Too many attempts — wait a while and try again" });
+  }
+  var code = (req.body && req.body.code) || "";
+  var backupCode = (req.body && req.body.backupCode) || "";
+  var pendingToken = req.cookies && req.cookies[PENDING_2FA_COOKIE];
+  if (!pendingToken) {
+    return res.status(401).json({ ok: false, error: "Your login has expired — enter your password again" });
+  }
+  getAuthRow()
+    .then(function (row) {
+      if (!row || !verifyPending2fa(pendingToken, row.password_hash)) {
+        res.clearCookie(PENDING_2FA_COOKIE);
+        return res.status(401).json({ ok: false, error: "Your login has expired — enter your password again" });
+      }
+      if (!row.totp_enabled) {
+        // Turned off mid-flow (e.g. from another tab) — the password was
+        // already verified, so just let them in.
+        res.clearCookie(PENDING_2FA_COOKIE);
+        res.cookie(COOKIE_NAME, signToken(row.password_hash), COOKIE_OPTS);
+        return res.json({ ok: true });
+      }
+      if (code && verifyTotp(row.totp_secret, code)) {
+        res.clearCookie(PENDING_2FA_COOKIE);
+        res.cookie(COOKIE_NAME, signToken(row.password_hash), COOKIE_OPTS);
+        return res.json({ ok: true });
+      }
+      if (backupCode) {
+        var normalized = normalizeBackupCode(backupCode);
+        var codes = row.backup_codes || [];
+        var matchIdx = -1;
+        for (var i = 0; i < codes.length; i++) {
+          if (!codes[i].usedAt && verifyPassword(normalized, codes[i].hash)) { matchIdx = i; break; }
+        }
+        if (matchIdx !== -1) {
+          codes[matchIdx].usedAt = new Date().toISOString();
+          return pool.query("UPDATE app_auth SET backup_codes = $1 WHERE id = 1", [JSON.stringify(codes)])
+            .then(function () {
+              res.clearCookie(PENDING_2FA_COOKIE);
+              res.cookie(COOKIE_NAME, signToken(row.password_hash), COOKIE_OPTS);
+              res.json({ ok: true, usedBackupCode: true });
+            });
+        }
+      }
+      return res.status(401).json({ ok: false, error: "Incorrect code" });
+    })
+    .catch(function (err) {
+      console.error("POST /api/login/verify-2fa failed:", err);
+      res.status(500).json({ ok: false, error: "Something went wrong — try again" });
+    });
+});
+
 app.post("/api/logout", function (req, res) {
   res.clearCookie(COOKIE_NAME);
+  res.clearCookie(PENDING_2FA_COOKIE);
   res.json({ ok: true });
 });
 
@@ -711,6 +935,112 @@ app.use(requireAuth);
 
 app.get("/", function (req, res) {
   res.sendFile(path.join(__dirname, "public", "index.html"));
+});
+
+/* ====================== TWO-FACTOR AUTH MANAGEMENT ====================== */
+/* Everything below requires an existing session (app.use(requireAuth) above),
+   unlike /api/login and /api/login/verify-2fa which run before it. */
+
+app.get("/api/2fa/status", function (req, res) {
+  getAuthRow()
+    .then(function (row) {
+      var codes = (row && row.backup_codes) || [];
+      var remaining = codes.filter(function (c) { return !c.usedAt; }).length;
+      res.json({
+        enabled: !!(row && row.totp_enabled),
+        backupCodesRemaining: remaining
+      });
+    })
+    .catch(function (err) {
+      console.error("GET /api/2fa/status failed:", err);
+      res.status(500).json({ error: "Could not load two-factor status" });
+    });
+});
+
+app.post("/api/2fa/setup", function (req, res) {
+  getAuthRow()
+    .then(function (row) {
+      if (row && row.totp_enabled) {
+        return res.status(400).json({ ok: false, error: "Two-factor authentication is already on" });
+      }
+      var secret = generateTotpSecret();
+      return pool.query("UPDATE app_auth SET totp_secret = $1 WHERE id = 1", [secret])
+        .then(function () {
+          var otpauthUrl = totpAuthUrl(secret, "Darren Sims Projects", "Fieldnotes");
+          return QRCode.toDataURL(otpauthUrl).then(function (qrDataUrl) {
+            res.json({ ok: true, secret: secret, qrDataUrl: qrDataUrl });
+          });
+        });
+    })
+    .catch(function (err) {
+      console.error("POST /api/2fa/setup failed:", err);
+      res.status(500).json({ ok: false, error: "Could not start two-factor setup" });
+    });
+});
+
+app.post("/api/2fa/confirm", function (req, res) {
+  var code = (req.body && req.body.code) || "";
+  getAuthRow()
+    .then(function (row) {
+      if (!row || !row.totp_secret) {
+        return res.status(400).json({ ok: false, error: "Start setup again before confirming" });
+      }
+      if (row.totp_enabled) {
+        return res.status(400).json({ ok: false, error: "Two-factor authentication is already on" });
+      }
+      if (!verifyTotp(row.totp_secret, code)) {
+        return res.status(401).json({ ok: false, error: "Incorrect code — check the time on your phone and try again" });
+      }
+      var plainCodes = generateBackupCodes(10);
+      var storedCodes = plainCodes.map(function (c) { return { hash: hashPassword(normalizeBackupCode(c)), usedAt: null }; });
+      return pool.query(
+        "UPDATE app_auth SET totp_enabled = true, backup_codes = $1 WHERE id = 1",
+        [JSON.stringify(storedCodes)]
+      ).then(function () {
+        res.json({ ok: true, backupCodes: plainCodes });
+      });
+    })
+    .catch(function (err) {
+      console.error("POST /api/2fa/confirm failed:", err);
+      res.status(500).json({ ok: false, error: "Could not confirm two-factor setup" });
+    });
+});
+
+app.post("/api/2fa/disable", function (req, res) {
+  var password = (req.body && req.body.password) || "";
+  getAuthRow()
+    .then(function (row) {
+      if (!row || !verifyPassword(password, row.password_hash)) {
+        return res.status(401).json({ ok: false, error: "Incorrect password" });
+      }
+      return pool.query("UPDATE app_auth SET totp_enabled = false, totp_secret = NULL, backup_codes = '[]'::jsonb WHERE id = 1")
+        .then(function () { res.json({ ok: true }); });
+    })
+    .catch(function (err) {
+      console.error("POST /api/2fa/disable failed:", err);
+      res.status(500).json({ ok: false, error: "Could not turn off two-factor authentication" });
+    });
+});
+
+app.post("/api/2fa/regenerate-backup-codes", function (req, res) {
+  var password = (req.body && req.body.password) || "";
+  getAuthRow()
+    .then(function (row) {
+      if (!row || !verifyPassword(password, row.password_hash)) {
+        return res.status(401).json({ ok: false, error: "Incorrect password" });
+      }
+      if (!row.totp_enabled) {
+        return res.status(400).json({ ok: false, error: "Two-factor authentication isn't on" });
+      }
+      var plainCodes = generateBackupCodes(10);
+      var storedCodes = plainCodes.map(function (c) { return { hash: hashPassword(normalizeBackupCode(c)), usedAt: null }; });
+      return pool.query("UPDATE app_auth SET backup_codes = $1 WHERE id = 1", [JSON.stringify(storedCodes)])
+        .then(function () { res.json({ ok: true, backupCodes: plainCodes }); });
+    })
+    .catch(function (err) {
+      console.error("POST /api/2fa/regenerate-backup-codes failed:", err);
+      res.status(500).json({ ok: false, error: "Could not regenerate backup codes" });
+    });
 });
 
 app.get("/api/state", function (req, res) {

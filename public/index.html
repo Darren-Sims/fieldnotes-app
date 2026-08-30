@@ -878,6 +878,7 @@
       "</div>" +
       '<div class="rail-foot"><span class="save-pill" id="savePill" data-state="idle"><span class="save-dot"></span><span id="savePillText">—</span></span>' +
       '<button type="button" class="backup-link" data-open-modal="backup">Backup data</button>' +
+      '<button type="button" class="backup-link" data-open-modal="security">Security</button>' +
       '<button type="button" class="backup-link" data-logout="1">Log out</button></div>' +
       "</nav>";
   }
@@ -2432,6 +2433,184 @@
     });
   }
 
+  /* ---- Security: two-factor authentication setup and management ---- */
+
+  function openSecurityModal() {
+    var dlg = openDialog("Security", '<p class="hint">Loading…</p>');
+    fetch("/api/2fa/status")
+      .then(function (res) { return res.json(); })
+      .then(function (data) { renderSecurityStatus(dlg, data); })
+      .catch(function () {
+        setDialogBody(dlg, '<p class="hint">Couldn’t load your security settings — try again.</p>' +
+          '<div class="dialog-actions"><button type="button" class="btn" data-close-dialog="1">Close</button></div>');
+      });
+  }
+
+  function setDialogBody(dlg, html) {
+    var body = dlg.querySelector("#dialogBody");
+    if (body) body.innerHTML = html;
+    return body;
+  }
+
+  function renderSecurityStatus(dlg, data) {
+    if (data && data.enabled) {
+      var remaining = data.backupCodesRemaining;
+      var body = setDialogBody(dlg,
+        '<p class="hint" style="margin-bottom:6px;">Two-factor authentication is on.</p>' +
+        '<p class="hint" style="margin-bottom:18px;">' + remaining + " backup code" + (remaining === 1 ? "" : "s") + " left.</p>" +
+        '<div class="field"><button type="button" class="btn" id="regenBackupBtn">Regenerate backup codes</button>' +
+        '<div class="hint">Makes your current backup codes stop working and gives you a fresh set.</div></div>' +
+        '<div class="dialog-actions"><button type="button" class="btn" data-close-dialog="1">Close</button>' +
+        '<button type="button" class="btn btn-danger-quiet" id="disable2faBtn">Turn off two-factor authentication</button></div>'
+      );
+      body.querySelector("#disable2faBtn").addEventListener("click", function () {
+        askPasswordThen(dlg, "Turn off two-factor authentication", "Enter your password to turn off two-factor authentication.", "Turn off", function (password, onDone) {
+          fetch("/api/2fa/disable", {
+            method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: password })
+          }).then(function (res) { return res.json().then(function (data) { return { res: res, data: data }; }); })
+            .then(function (r) {
+              if (!r.res.ok) { onDone(r.data && r.data.error); return; }
+              onDone(null);
+              showToast("Two-factor authentication turned off");
+              dlg.close();
+            })
+            .catch(function () { onDone("Something went wrong — try again"); });
+        });
+      });
+      body.querySelector("#regenBackupBtn").addEventListener("click", function () {
+        askPasswordThen(dlg, "Regenerate backup codes", "Enter your password to generate a new set of backup codes. Your old codes will stop working.", "Regenerate", function (password, onDone) {
+          fetch("/api/2fa/regenerate-backup-codes", {
+            method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: password })
+          }).then(function (res) { return res.json().then(function (data) { return { res: res, data: data }; }); })
+            .then(function (r) {
+              if (!r.res.ok) { onDone(r.data && r.data.error); return; }
+              onDone(null);
+              renderBackupCodes(dlg, r.data.backupCodes, false);
+            })
+            .catch(function () { onDone("Something went wrong — try again"); });
+        });
+      });
+      return;
+    }
+
+    var body2 = setDialogBody(dlg,
+      '<p class="hint" style="margin-bottom:14px;">Add a second step at login using an authenticator app — Google Authenticator, Authy, 1Password, and similar all work. Once it’s on, logging in needs your password and a 6-digit code.</p>' +
+      '<div class="dialog-actions"><button type="button" class="btn" data-close-dialog="1">Close</button>' +
+      '<button type="button" class="btn btn-primary" id="start2faBtn">Turn on two-factor authentication</button></div>'
+    );
+    body2.querySelector("#start2faBtn").addEventListener("click", function () {
+      setDialogBody(dlg, '<p class="hint">Setting up…</p>');
+      fetch("/api/2fa/setup", { method: "POST" })
+        .then(function (res) { return res.json().then(function (data) { return { res: res, data: data }; }); })
+        .then(function (r) {
+          if (!r.res.ok) {
+            showToast((r.data && r.data.error) || "Could not start setup");
+            renderSecurityStatus(dlg, { enabled: false });
+            return;
+          }
+          renderSetup2faStep(dlg, r.data.secret, r.data.qrDataUrl);
+        })
+        .catch(function () {
+          showToast("Something went wrong — try again");
+          renderSecurityStatus(dlg, { enabled: false });
+        });
+    });
+  }
+
+  function renderSetup2faStep(dlg, secret, qrDataUrl) {
+    var body = setDialogBody(dlg,
+      '<p class="hint" style="margin-bottom:12px;">Scan this with your authenticator app, or enter the key manually.</p>' +
+      (qrDataUrl ? '<div style="text-align:center;margin-bottom:14px;"><img src="' + esc(qrDataUrl) + '" alt="QR code for two-factor setup" width="180" height="180" style="border:1px solid var(--border);border-radius:8px;"></div>' : "") +
+      '<div class="field"><label for="manualSecretInput">Manual entry key</label>' +
+      '<input type="text" id="manualSecretInput" readonly value="' + esc(secret) + '" style="font-family:var(--font-mono);letter-spacing:0.04em;"></div>' +
+      '<div class="field" style="margin-top:14px;"><label for="confirm2faCode">Enter the 6-digit code to confirm</label>' +
+      '<input type="text" id="confirm2faCode" inputmode="numeric" autocomplete="one-time-code" placeholder="123456"></div>' +
+      '<div class="dialog-actions"><button type="button" class="btn" data-close-dialog="1">Cancel</button>' +
+      '<button type="button" class="btn btn-primary" id="confirm2faBtn">Confirm and turn on</button></div>'
+    );
+    var codeInput = body.querySelector("#confirm2faCode");
+    codeInput.focus();
+    function submit() {
+      var code = codeInput.value.trim();
+      if (!code) { codeInput.focus(); return; }
+      var btn = body.querySelector("#confirm2faBtn");
+      btn.disabled = true;
+      fetch("/api/2fa/confirm", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: code })
+      }).then(function (res) { return res.json().then(function (data) { return { res: res, data: data }; }); })
+        .then(function (r) {
+          if (!r.res.ok) {
+            showToast((r.data && r.data.error) || "Incorrect code");
+            btn.disabled = false;
+            codeInput.value = "";
+            codeInput.focus();
+            return;
+          }
+          renderBackupCodes(dlg, r.data.backupCodes, true);
+        })
+        .catch(function () {
+          showToast("Something went wrong — try again");
+          btn.disabled = false;
+        });
+    }
+    body.querySelector("#confirm2faBtn").addEventListener("click", submit);
+    codeInput.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); submit(); } });
+  }
+
+  function renderBackupCodes(dlg, codes, justEnabled) {
+    var intro = justEnabled
+      ? "Two-factor authentication is on. Save these one-time backup codes somewhere safe, like a password manager — each works once if you ever lose access to your authenticator app."
+      : "Here’s your new set of backup codes — the old ones no longer work. Save these somewhere safe, like a password manager.";
+    var grid = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 16px;font-family:var(--font-mono);font-size:13.5px;background:var(--surface-sunken);border-radius:var(--radius-md);padding:14px;margin:14px 0;">' +
+      codes.map(function (c) { return "<div>" + esc(c) + "</div>"; }).join("") + "</div>";
+    var body = setDialogBody(dlg,
+      '<p class="hint">' + esc(intro) + "</p>" + grid +
+      '<div class="dialog-actions"><button type="button" class="btn" id="copyBackupCodesBtn">Copy codes</button>' +
+      '<button type="button" class="btn btn-primary" data-close-dialog="1">Done</button></div>'
+    );
+    body.querySelector("#copyBackupCodesBtn").addEventListener("click", function () {
+      var text = codes.join("\n");
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(function () { showToast("Copied"); }).catch(function () { showToast("Couldn't copy — select and copy manually"); });
+      } else {
+        showToast("Couldn't copy — select and copy manually");
+      }
+    });
+  }
+
+  /**
+   * A small password-confirmation step used before security-sensitive
+   * actions (turning off 2FA, regenerating backup codes). Swaps the
+   * dialog body in place; onSubmit gets (password, onDone) and must call
+   * onDone(errorMessageOrNull) when the request finishes.
+   */
+  function askPasswordThen(dlg, title, message, confirmLabel, onSubmit) {
+    var body = setDialogBody(dlg,
+      '<p class="hint" style="margin-bottom:14px;">' + esc(message) + "</p>" +
+      '<div class="field"><label for="confirmPasswordInput">Password</label><input type="password" id="confirmPasswordInput" autocomplete="current-password"></div>' +
+      '<div class="dialog-actions"><button type="button" class="btn" data-close-dialog="1">Cancel</button>' +
+      '<button type="button" class="btn btn-primary" id="confirmPasswordBtn">' + esc(confirmLabel) + "</button></div>"
+    );
+    var input = body.querySelector("#confirmPasswordInput");
+    input.focus();
+    function submit() {
+      var password = input.value;
+      if (!password) { input.focus(); return; }
+      var btn = body.querySelector("#confirmPasswordBtn");
+      btn.disabled = true;
+      onSubmit(password, function (errorMessage) {
+        btn.disabled = false;
+        if (errorMessage) {
+          showToast(errorMessage);
+          input.value = "";
+          input.focus();
+        }
+      });
+    }
+    body.querySelector("#confirmPasswordBtn").addEventListener("click", submit);
+    input.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); submit(); } });
+  }
+
   function clientFormHTML(c) {
     c = c || { name: "", company: "", industry: "", notes: "", websiteUrl: "", brandColor: "", wantsContent: false };
     var swatchColor = isValidHex(c.brandColor) ? c.brandColor : "#3d63d1";
@@ -2573,6 +2752,7 @@
       if (kind === "client") openClientModal(null);
       if (kind === "project") openProjectModal(null);
       if (kind === "backup") openBackupModal();
+      if (kind === "security") openSecurityModal();
       return;
     }
     if ((el = e.target.closest("[data-close-dialog]"))) { document.getElementById("appDialog").close(); return; }

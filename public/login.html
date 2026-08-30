@@ -227,24 +227,46 @@
           </div>
         </div>
 
-        <h1 class="title">Log in to your account</h1>
-        <p class="lede">Enter the password to open your tracker.</p>
+        <div id="stepPassword">
+          <h1 class="title">Log in to your account</h1>
+          <p class="lede">Enter the password to open your tracker.</p>
 
-        <div class="error" id="loginError" role="alert" data-show="0">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.4"/><path d="M8 4.5V8.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="8" cy="11" r="0.9" fill="currentColor"/></svg>
-          <span id="loginErrorText">Incorrect password. Try again.</span>
+          <div class="error" id="loginError" role="alert" data-show="0">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.4"/><path d="M8 4.5V8.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="8" cy="11" r="0.9" fill="currentColor"/></svg>
+            <span id="loginErrorText">Incorrect password. Try again.</span>
+          </div>
+
+          <form id="loginForm" novalidate>
+            <div class="field">
+              <label for="password">Password</label>
+              <input type="password" id="password" name="password" autocomplete="current-password" required autofocus>
+            </div>
+            <button type="submit" class="btn-primary" id="loginBtn">Log in</button>
+          </form>
+
+          <p class="foot-note"><a href="/forgot-password">Forgot password?</a></p>
+          <p class="foot-note">Private tool — access is limited to people with the password.</p>
         </div>
 
-        <form id="loginForm" novalidate>
-          <div class="field">
-            <label for="password">Password</label>
-            <input type="password" id="password" name="password" autocomplete="current-password" required autofocus>
-          </div>
-          <button type="submit" class="btn-primary" id="loginBtn">Log in</button>
-        </form>
+        <div id="step2fa" hidden>
+          <h1 class="title">Enter your code</h1>
+          <p class="lede">Open your authenticator app and enter the current 6-digit code, or use a backup code.</p>
 
-        <p class="foot-note"><a href="/forgot-password">Forgot password?</a></p>
-        <p class="foot-note">Private tool — access is limited to people with the password.</p>
+          <div class="error" id="twoFaError" role="alert" data-show="0">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.4"/><path d="M8 4.5V8.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="8" cy="11" r="0.9" fill="currentColor"/></svg>
+            <span id="twoFaErrorText">Incorrect code. Try again.</span>
+          </div>
+
+          <form id="twoFaForm" novalidate>
+            <div class="field">
+              <label for="twoFaCode">Code</label>
+              <input type="text" id="twoFaCode" name="code" inputmode="numeric" autocomplete="one-time-code" placeholder="123456">
+            </div>
+            <button type="submit" class="btn-primary" id="twoFaBtn">Verify</button>
+          </form>
+
+          <p class="foot-note"><a href="/login">Use a different password</a></p>
+        </div>
       </div>
     </main>
   </div>
@@ -252,28 +274,37 @@
   <script>
     (function () {
       "use strict";
+      var stepPassword = document.getElementById("stepPassword");
+      var step2fa = document.getElementById("step2fa");
+
       var form = document.getElementById("loginForm");
       var input = document.getElementById("password");
       var btn = document.getElementById("loginBtn");
       var errBox = document.getElementById("loginError");
       var errText = document.getElementById("loginErrorText");
 
-      function showError(msg) {
-        errText.textContent = msg;
-        errBox.setAttribute("data-show", "1");
-        input.setAttribute("aria-invalid", "true");
+      var twoFaForm = document.getElementById("twoFaForm");
+      var twoFaInput = document.getElementById("twoFaCode");
+      var twoFaBtn = document.getElementById("twoFaBtn");
+      var twoFaErrBox = document.getElementById("twoFaError");
+      var twoFaErrText = document.getElementById("twoFaErrorText");
+
+      function showError(box, textEl, field, msg) {
+        textEl.textContent = msg;
+        box.setAttribute("data-show", "1");
+        if (field) field.setAttribute("aria-invalid", "true");
       }
-      function clearError() {
-        errBox.setAttribute("data-show", "0");
-        input.removeAttribute("aria-invalid");
+      function clearError(box, field) {
+        box.setAttribute("data-show", "0");
+        if (field) field.removeAttribute("aria-invalid");
       }
 
       form.addEventListener("submit", function (e) {
         e.preventDefault();
-        clearError();
+        clearError(errBox, input);
         var password = input.value;
         if (!password) {
-          showError("Enter your password.");
+          showError(errBox, errText, input, "Enter your password.");
           input.focus();
           return;
         }
@@ -285,22 +316,66 @@
           body: JSON.stringify({ password: password })
         })
           .then(function (res) {
-            if (res.ok) {
-              window.location.href = "/";
-              return;
-            }
             return res.json().catch(function () { return {}; }).then(function (data) {
-              showError((data && data.error) || "Incorrect password. Try again.");
+              if (res.ok && data && data.needs2fa) {
+                stepPassword.hidden = true;
+                step2fa.hidden = false;
+                twoFaInput.focus();
+                return;
+              }
+              if (res.ok) {
+                window.location.href = "/";
+                return;
+              }
+              showError(errBox, errText, input, (data && data.error) || "Incorrect password. Try again.");
               input.value = "";
               input.focus();
             });
           })
           .catch(function () {
-            showError("Couldn't reach the server. Check your connection and try again.");
+            showError(errBox, errText, input, "Couldn't reach the server. Check your connection and try again.");
           })
           .then(function () {
             btn.disabled = false;
             btn.textContent = "Log in";
+          });
+      });
+
+      twoFaForm.addEventListener("submit", function (e) {
+        e.preventDefault();
+        clearError(twoFaErrBox, twoFaInput);
+        var raw = twoFaInput.value.trim();
+        if (!raw) {
+          showError(twoFaErrBox, twoFaErrText, twoFaInput, "Enter your code.");
+          twoFaInput.focus();
+          return;
+        }
+        var digitsOnly = raw.replace(/\s+/g, "");
+        var payload = /^\d{6}$/.test(digitsOnly) ? { code: digitsOnly } : { backupCode: raw };
+        twoFaBtn.disabled = true;
+        twoFaBtn.textContent = "Verifying…";
+        fetch("/api/login/verify-2fa", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        })
+          .then(function (res) {
+            return res.json().catch(function () { return {}; }).then(function (data) {
+              if (res.ok) {
+                window.location.href = "/";
+                return;
+              }
+              showError(twoFaErrBox, twoFaErrText, twoFaInput, (data && data.error) || "Incorrect code. Try again.");
+              twoFaInput.value = "";
+              twoFaInput.focus();
+            });
+          })
+          .catch(function () {
+            showError(twoFaErrBox, twoFaErrText, twoFaInput, "Couldn't reach the server. Check your connection and try again.");
+          })
+          .then(function () {
+            twoFaBtn.disabled = false;
+            twoFaBtn.textContent = "Verify";
           });
       });
     })();
